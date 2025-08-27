@@ -1,5 +1,4 @@
 {
-  "homepages": "https://visionxma.github.io/LegalX",
   "name": "vite-react-typescript-starter",
   "private": true,
   "version": "0.0.0",
@@ -8,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
@@ -45,4 +44,5 @@
     "vite": "^5.4.2"
   }
 }
+
 
