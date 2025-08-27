@@ -7,6 +7,6 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
-  base: '/LegalX', // 👈 importante para funcionar no GitHub Pages
+  base: '/LegalX/', // 👈 importante para funcionar no GitHub Pages
 })
 
