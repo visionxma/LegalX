@@ -1,0 +1,128 @@
+{
+  "teams": {
+    "team_example_123": {
+      "name": "Silva & Associados Advocacia",
+      "ownerUid": "user_owner_123",
+      "logoUrl": "https://via.placeholder.com/200x200/2563eb/ffffff?text=SA",
+      "cpfCnpj": "12.345.678/0001-90",
+      "oab": "123456/SP",
+      "ccm": "987654321",
+      "email": "contato@silva.adv.br",
+      "website": "https://silva.adv.br",
+      "areaOfPractice": "Direito Civil, Direito Trabalhista, Direito Empresarial",
+      "phones": [
+        {
+          "id": "phone1",
+          "type": "Telefone comercial",
+          "number": "(11) 3333-4444",
+          "operator": "Vivo"
+        },
+        {
+          "id": "phone2",
+          "type": "Celular comercial", 
+          "number": "(11) 99999-8888",
+          "operator": "Claro"
+        },
+        {
+          "id": "phone3",
+          "type": "WhatsApp",
+          "number": "(11) 98888-7777"
+        }
+      ],
+      "address": {
+        "type": "Comercial",
+        "cep": "01310-100",
+        "street": "Av. Paulista, 1000",
+        "complement": "Sala 1001",
+        "city": "São Paulo",
+        "state": "SP",
+        "country": "Brasil"
+      },
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "settings": {
+        "allowInvitations": true,
+        "defaultRole": "viewer",
+        "modules": ["processos", "agenda", "documentos", "relatorios"]
+      }
+    }
+  },
+  "teamMembers": {
+    "user_owner_123_team_example_123": {
+      "uid": "user_owner_123",
+      "email": "owner@silva.adv.br",
+      "teamId": "team_example_123",
+      "role": "owner",
+      "permissions": {
+        "financas": true,
+        "processos": true,
+        "agenda": true,
+        "documentos": true,
+        "relatorios": true,
+        "equipe": true,
+        "configuracoes": true
+      },
+      "status": "active",
+      "addedAt": "2024-01-01T00:00:00.000Z",
+      "addedBy": "user_owner_123"
+    },
+    "user_admin_456_team_example_123": {
+      "uid": "user_admin_456",
+      "email": "admin@silva.adv.br",
+      "teamId": "team_example_123",
+      "role": "admin",
+      "permissions": {
+        "financas": true,
+        "processos": true,
+        "agenda": true,
+        "documentos": true,
+        "relatorios": true,
+        "equipe": true,
+        "configuracoes": false
+      },
+      "status": "active",
+      "addedAt": "2024-01-02T00:00:00.000Z",
+      "addedBy": "user_owner_123"
+    },
+    "user_editor_789_team_example_123": {
+      "uid": "user_editor_789",
+      "email": "editor@silva.adv.br",
+      "teamId": "team_example_123",
+      "role": "editor",
+      "permissions": {
+        "financas": false,
+        "processos": true,
+        "agenda": true,
+        "documentos": true,
+        "relatorios": false,
+        "equipe": false,
+        "configuracoes": false
+      },
+      "status": "active",
+      "addedAt": "2024-01-03T00:00:00.000Z",
+      "addedBy": "user_owner_123"
+    }
+  },
+  "invitations": {
+    "invite_pending_123": {
+      "email": "novo@usuario.com",
+      "teamId": "team_example_123",
+      "role": "viewer",
+      "token": "abc123xyz789def456",
+      "expiresAt": "2024-01-07T00:00:00.000Z",
+      "createdAt": "2024-01-04T00:00:00.000Z",
+      "createdBy": "user_owner_123",
+      "status": "pending"
+    },
+    "invite_accepted_456": {
+      "email": "aceito@usuario.com",
+      "teamId": "team_example_123",
+      "role": "editor",
+      "token": "xyz789abc123ghi456",
+      "expiresAt": "2024-01-06T00:00:00.000Z",
+      "createdAt": "2024-01-03T00:00:00.000Z",
+      "createdBy": "user_owner_123",
+      "status": "accepted",
+      "usedAt": "2024-01-03T12:30:00.000Z"
+    }
+  }
+}

@@ -1,0 +1,92 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Regras para usuários autenticados
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Verificar se é o próprio usuário
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // Verificar se é membro ativo da equipe
+    function isTeamMember(teamId) {
+      return exists(/databases/$(database)/documents/teamMembers/$(request.auth.uid + '_' + teamId)) &&
+             get(/databases/$(database)/documents/teamMembers/$(request.auth.uid + '_' + teamId)).data.status == 'active';
+    }
+    
+    // Verificar se tem permissão específica
+    function hasPermission(teamId, permission) {
+      let memberDoc = get(/databases/$(database)/documents/teamMembers/$(request.auth.uid + '_' + teamId));
+      return memberDoc.data.permissions[permission] == true;
+    }
+    
+    // Verificar se é owner ou admin da equipe
+    function isTeamOwnerOrAdmin(teamId) {
+      let memberDoc = get(/databases/$(database)/documents/teamMembers/$(request.auth.uid + '_' + teamId));
+      return memberDoc.data.role in ['owner', 'admin'];
+    }
+
+    // Regras para dados pessoais do usuário (compatibilidade com sistema atual)
+    match /userData/{userId}/{collection}/{document} {
+      allow read, write: if isAuthenticated() && isOwner(userId);
+    }
+    
+    // Regras para usuários
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && isOwner(userId);
+    }
+    
+    // Regras para teams
+    match /teams/{teamId} {
+      allow read: if isAuthenticated() && isTeamMember(teamId);
+      allow write: if isAuthenticated() && isTeamOwnerOrAdmin(teamId);
+    }
+    
+    // Regras para membros da equipe
+    match /teamMembers/{memberId} {
+      allow read: if isAuthenticated() && 
+                     (resource.data.uid == request.auth.uid || 
+                      isTeamMember(resource.data.teamId));
+      allow create: if isAuthenticated() && 
+                       (request.auth.uid == resource.data.uid || 
+                        isTeamOwnerOrAdmin(resource.data.teamId));
+      allow update: if isAuthenticated() && isTeamOwnerOrAdmin(resource.data.teamId);
+      allow delete: if isAuthenticated() && 
+                       (isTeamOwnerOrAdmin(resource.data.teamId) && 
+                        resource.data.role != 'owner');
+    }
+    
+    // Regras para convites
+    match /invitations/{inviteId} {
+      allow read: if isAuthenticated() && 
+                     (request.auth.uid == resource.data.createdBy ||
+                      request.auth.email == resource.data.email);
+      allow create: if isAuthenticated() && isTeamOwnerOrAdmin(resource.data.teamId);
+      allow update: if isAuthenticated() && 
+                       (request.auth.uid == resource.data.createdBy ||
+                        request.auth.email == resource.data.email);
+      allow delete: if isAuthenticated() && 
+                       (request.auth.uid == resource.data.createdBy ||
+                        isTeamOwnerOrAdmin(resource.data.teamId));
+    }
+    
+    // Regras para dados da equipe (processos, eventos, etc.)
+    match /teamData/{teamId}/{collection}/{document} {
+      allow read: if isAuthenticated() && isTeamMember(teamId) && 
+                     hasPermission(teamId, collection);
+      allow write: if isAuthenticated() && isTeamMember(teamId) && 
+                      hasPermission(teamId, collection);
+    }
+    
+    // Regras para storage (logos, anexos)
+    match /teams/{teamId}/{allPaths=**} {
+      allow read: if isAuthenticated() && isTeamMember(teamId);
+      allow write: if isAuthenticated() && isTeamOwnerOrAdmin(teamId);
+    }
+  }
+}

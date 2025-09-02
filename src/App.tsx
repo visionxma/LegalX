@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Routes, Route, useLocation } from "react-router-dom"
 import AuthWrapper from "./components/Auth/AuthWrapper"
 import Header from "./components/Layout/Header"
 import Sidebar from "./components/Layout/Sidebar"
@@ -16,13 +17,17 @@ import LawyerForm from "./components/Team/LawyerForm"
 import LawyerView from "./components/Team/LawyerView"
 import EmployeeForm from "./components/Team/EmployeeForm"
 import EmployeeView from "./components/Team/EmployeeView"
+import AdminPage from "./components/Admin/AdminPage"
+import InviteAcceptPage from "./components/Admin/InviteAcceptPage"
 import type { Process, CalendarEvent } from "./types"
 import type { Lawyer, Employee } from "./types"
 import type { User } from "./types/auth"
 import { authService } from "./services/authService"
 
 function App() {
+  const location = useLocation()
   const [activeSection, setActiveSection] = useState("dashboard")
+  const [showAdmin, setShowAdmin] = useState(false)
   const [selectedProcess, setSelectedProcess] = useState<Process | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
   const [selectedLawyer, setSelectedLawyer] = useState<Lawyer | null>(null)
@@ -31,6 +36,13 @@ function App() {
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list")
   const [quickActionType, setQuickActionType] = useState<string | null>(null)
 
+  // Verificar se estamos na rota de aceitar convite
+  const isInviteRoute = location.pathname === '/aceitar'
+
+  // Se estiver na rota de convite, renderizar apenas a página de aceite
+  if (isInviteRoute) {
+    return <InviteAcceptPage />
+  }
   const handleLogout = async () => {
     try {
       await authService.logout()
@@ -42,6 +54,7 @@ function App() {
 
   const handleSectionChange = (section: string) => {
     setActiveSection(section)
+    setShowAdmin(false)
     setViewMode("list")
     setSelectedProcess(null)
     setSelectedEvent(null)
@@ -50,7 +63,17 @@ function App() {
     setQuickActionType(null)
   }
 
+  const handleOpenAdmin = () => {
+    setShowAdmin(true)
+    setActiveSection("")
+  }
+
+  const handleCloseAdmin = () => {
+    setShowAdmin(false)
+    setActiveSection("dashboard")
+  }
   const handleQuickAction = (action: string) => {
+    setShowAdmin(false)
     switch (action) {
       case "new-power-of-attorney":
         setActiveSection("documents")
@@ -117,6 +140,10 @@ function App() {
   }
 
   const renderContent = () => {
+    if (showAdmin) {
+      return <AdminPage onBack={handleCloseAdmin} />
+    }
+
     switch (activeSection) {
       case "dashboard":
         return <Dashboard />
@@ -253,7 +280,7 @@ function App() {
 
   const renderApp = (user: User) => (
     <div className="flex flex-col h-screen bg-gray-50">
-      <Header user={user} onLogout={handleLogout} />
+      <Header user={user} onLogout={handleLogout} onOpenAdmin={handleOpenAdmin} />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           activeSection={activeSection}
@@ -265,7 +292,12 @@ function App() {
     </div>
   )
 
-  return <AuthWrapper>{renderApp}</AuthWrapper>
+  return (
+    <Routes>
+      <Route path="/aceitar" element={<InviteAcceptPage />} />
+      <Route path="/*" element={<AuthWrapper>{renderApp}</AuthWrapper>} />
+    </Routes>
+  )
 }
 
 export default App

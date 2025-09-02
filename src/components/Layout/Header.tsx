@@ -3,15 +3,17 @@ import { User } from '../../types/auth';
 import { authService } from '../../services/authService';
 import { 
   UserCircleIcon,
-  ArrowRightOnRectangleIcon
+  ArrowRightOnRectangleIcon,
+  CogIcon
 } from '@heroicons/react/24/outline';
 
 interface HeaderProps {
   user: User;
   onLogout: () => void;
+  onOpenAdmin?: () => void;
 }
 
-export default function Header({ user, onLogout }: HeaderProps) {
+export default function Header({ user, onLogout, onOpenAdmin }: HeaderProps) {
   const handleLogout = () => {
     if (confirm('Tem certeza que deseja sair?')) {
       authService.logout();
@@ -43,6 +45,16 @@ export default function Header({ user, onLogout }: HeaderProps) {
           </div>
           
           <div className="flex items-center space-x-2">
+            {onOpenAdmin && (
+              <button
+                onClick={onOpenAdmin}
+                className="flex items-center px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Administração"
+              >
+                <CogIcon className="w-4 h-4 mr-1" />
+                Admin
+              </button>
+            )}
             <UserCircleIcon className="w-8 h-8 text-gray-400" />
             <button
               onClick={handleLogout}
