@@ -6,7 +6,6 @@ import {
   ShieldCheckIcon, 
   PencilIcon, 
   TrashIcon,
-  CrownIcon,
   UserGroupIcon
 } from '@heroicons/react/24/outline';
 import { format } from 'date-fns';
@@ -115,7 +114,7 @@ export default function AccessTab({ team }: AccessTabProps) {
   const getRoleIcon = (role: TeamRole) => {
     switch (role) {
       case 'owner':
-        return <CrownIcon className="w-4 h-4 text-amber-500" />;
+        return <UserIcon className="w-4 h-4 text-amber-500" />;
       case 'admin':
         return <ShieldCheckIcon className="w-4 h-4 text-blue-500" />;
       case 'editor':
