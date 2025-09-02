@@ -3,6 +3,8 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { adminService } from '../../services/adminService';
 import { TeamInvitation } from '../../types/admin';
 import { CheckCircleIcon, ExclamationTriangleIcon, ClockIcon } from '@heroicons/react/24/outline';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 export default function InviteAcceptPage() {
   const [searchParams] = useSearchParams();

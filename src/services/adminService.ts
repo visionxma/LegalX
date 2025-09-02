@@ -10,10 +10,10 @@ import {
   where,
   orderBy,
   Timestamp,
-  writeBatch
+  writeBatch,
+  setDoc
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { auth, db, storage } from '../firebase.config';
+import { auth, db } from '../firebase.config';
 import { Team, TeamMember, TeamInvitation, TeamRole, TeamPermissions, DEFAULT_PERMISSIONS } from '../types/admin';
 
 class AdminService {
@@ -26,73 +26,105 @@ class AdminService {
     return user.uid;
   }
 
+  private async waitForAuth(): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (auth.currentUser) {
+        resolve(true);
+        return;
+      }
+      
+      const unsubscribe = auth.onAuthStateChanged((user) => {
+        unsubscribe();
+        resolve(!!user);
+      });
+    });
+  }
+
   /**
    * TEAM MANAGEMENT
    */
   
   async getTeam(): Promise<Team | null> {
     try {
+      // Aguardar autenticação
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        console.log('Usuário não autenticado');
+        return null;
+      }
+
       const userId = this.getCurrentUserId();
+      console.log('Buscando equipe para usuário:', userId);
       
-      // Buscar team onde o usuário é owner ou membro
+      // Buscar team onde o usuário é owner
       const teamsQuery = query(
         collection(db, 'teams'),
         where('ownerUid', '==', userId)
       );
       
       const snapshot = await getDocs(teamsQuery);
+      console.log('Teams encontrados como owner:', snapshot.size);
       
       if (!snapshot.empty) {
         const teamDoc = snapshot.docs[0];
-        return {
+        const teamData = {
           id: teamDoc.id,
           ...teamDoc.data(),
           createdAt: teamDoc.data().createdAt?.toDate?.()?.toISOString() || teamDoc.data().createdAt
         } as Team;
+        console.log('Team encontrado como owner:', teamData);
+        return teamData;
       }
       
       // Se não é owner, verificar se é membro
-      const membersQuery = query(
-        collection(db, 'teamMembers'),
-        where('uid', '==', userId),
-        where('status', '==', 'active')
-      );
+      const memberDoc = await getDoc(doc(db, 'teamMembers', userId));
       
-      const membersSnapshot = await getDocs(membersQuery);
-      
-      if (!membersSnapshot.empty) {
-        const memberDoc = membersSnapshot.docs[0];
-        const teamId = memberDoc.data().teamId;
+      if (memberDoc.exists() && memberDoc.data().status === 'active') {
+        const memberData = memberDoc.data();
+        const teamId = memberData.teamId;
+        console.log('Usuário é membro da equipe:', teamId);
         
         const teamDoc = await getDoc(doc(db, 'teams', teamId));
         if (teamDoc.exists()) {
-          return {
+          const teamData = {
             id: teamDoc.id,
             ...teamDoc.data(),
             createdAt: teamDoc.data().createdAt?.toDate?.()?.toISOString() || teamDoc.data().createdAt
           } as Team;
+          console.log('Team encontrado como membro:', teamData);
+          return teamData;
         }
       }
       
+      console.log('Nenhuma equipe encontrada para o usuário');
       return null;
     } catch (error) {
       console.error('Erro ao buscar team:', error);
-      return null;
+      throw error;
     }
   }
 
   async createTeam(teamData: Omit<Team, 'id' | 'createdAt' | 'ownerUid'>): Promise<Team | null> {
     try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
       const userId = this.getCurrentUserId();
       const user = auth.currentUser;
       
-      if (!user) throw new Error('Usuário não autenticado');
+      if (!user || !user.email) {
+        throw new Error('Usuário não possui email válido');
+      }
       
+      console.log('Criando equipe para usuário:', userId);
+
       const newTeam = {
         ...teamData,
         ownerUid: userId,
         createdAt: Timestamp.now(),
-        settings: {
+        settings: teamData.settings || {
           allowInvitations: true,
           defaultRole: 'viewer' as TeamRole,
           modules: ['processos', 'agenda', 'documentos', 'relatorios']
@@ -100,9 +132,10 @@ class AdminService {
       };
 
       const teamRef = await addDoc(collection(db, 'teams'), newTeam);
+      console.log('Team criado com ID:', teamRef.id);
       
-      // Adicionar owner como membro
-      await addDoc(collection(db, 'teamMembers'), {
+      // Adicionar owner como membro usando o userId como documento ID
+      await setDoc(doc(db, 'teamMembers', userId), {
         uid: userId,
         email: user.email,
         teamId: teamRef.id,
@@ -113,7 +146,7 @@ class AdminService {
         addedBy: userId
       });
 
-      console.log('Team criado:', teamRef.id);
+      console.log('Owner adicionado como membro');
       
       return {
         id: teamRef.id,
@@ -123,37 +156,63 @@ class AdminService {
       };
     } catch (error) {
       console.error('Erro ao criar team:', error);
-      return null;
+      throw error;
     }
   }
 
   async updateTeam(teamId: string, updatedData: Partial<Team>): Promise<Team | null> {
     try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      console.log('Atualizando equipe:', teamId, updatedData);
       const teamRef = doc(db, 'teams', teamId);
       
-      await updateDoc(teamRef, {
+      const updatePayload = {
         ...updatedData,
         updatedAt: Timestamp.now()
+      };
+
+      // Remover campos undefined/null do payload
+      Object.keys(updatePayload).forEach(key => {
+        if (updatePayload[key] === undefined || updatePayload[key] === null) {
+          delete updatePayload[key];
+        }
       });
+
+      await updateDoc(teamRef, updatePayload);
       
-      console.log('Team atualizado:', teamId);
+      console.log('Team atualizado com sucesso');
       return await this.getTeam();
     } catch (error) {
       console.error('Erro ao atualizar team:', error);
-      return null;
+      throw error;
     }
   }
 
+  // REMOVIDO: uploadLogo (Firebase Storage não disponível no plano gratuito)
   async uploadLogo(file: File, teamId: string): Promise<string | null> {
     try {
-      const storageRef = ref(storage, `teams/${teamId}/logo/${file.name}`);
-      const snapshot = await uploadBytes(storageRef, file);
-      const downloadURL = await getDownloadURL(snapshot.ref);
+      console.log('Upload de logo não disponível no plano gratuito');
       
-      console.log('Logo uploaded:', downloadURL);
-      return downloadURL;
+      // Converter para base64 como alternativa temporária
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const base64 = e.target?.result as string;
+          console.log('Logo convertido para base64');
+          resolve(base64);
+        };
+        reader.onerror = () => {
+          console.error('Erro ao converter logo para base64');
+          resolve(null);
+        };
+        reader.readAsDataURL(file);
+      });
     } catch (error) {
-      console.error('Erro ao fazer upload do logo:', error);
+      console.error('Erro no upload do logo:', error);
       return null;
     }
   }
@@ -164,6 +223,13 @@ class AdminService {
   
   async getTeamMembers(teamId: string): Promise<TeamMember[]> {
     try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      console.log('Buscando membros para equipe:', teamId);
+      
       const membersQuery = query(
         collection(db, 'teamMembers'),
         where('teamId', '==', teamId),
@@ -171,69 +237,75 @@ class AdminService {
       );
       
       const snapshot = await getDocs(membersQuery);
+      console.log('Membros encontrados:', snapshot.size);
       
-      return snapshot.docs.map(doc => ({
+      const members = snapshot.docs.map(doc => ({
         ...doc.data(),
         addedAt: doc.data().addedAt?.toDate?.()?.toISOString() || doc.data().addedAt
       })) as TeamMember[];
+
+      return members;
     } catch (error) {
       console.error('Erro ao buscar membros:', error);
-      return [];
+      throw error;
     }
   }
 
   async updateMemberPermissions(teamId: string, memberUid: string, permissions: TeamPermissions, role?: TeamRole): Promise<boolean> {
     try {
-      const membersQuery = query(
-        collection(db, 'teamMembers'),
-        where('teamId', '==', teamId),
-        where('uid', '==', memberUid)
-      );
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      console.log('Atualizando permissões do membro:', memberUid);
       
-      const snapshot = await getDocs(membersQuery);
+      const memberRef = doc(db, 'teamMembers', memberUid);
+      const memberDoc = await getDoc(memberRef);
       
-      if (snapshot.empty) {
-        throw new Error('Membro não encontrado');
+      if (!memberDoc.exists() || memberDoc.data().teamId !== teamId) {
+        throw new Error('Membro não encontrado na equipe');
       }
       
-      const memberDoc = snapshot.docs[0];
       const updateData: any = { permissions };
       
       if (role) {
         updateData.role = role;
       }
       
-      await updateDoc(memberDoc.ref, updateData);
+      await updateDoc(memberRef, updateData);
       
-      console.log('Permissões atualizadas para:', memberUid);
+      console.log('Permissões atualizadas com sucesso');
       return true;
     } catch (error) {
       console.error('Erro ao atualizar permissões:', error);
-      return false;
+      throw error;
     }
   }
 
   async removeMember(teamId: string, memberUid: string): Promise<boolean> {
     try {
-      const membersQuery = query(
-        collection(db, 'teamMembers'),
-        where('teamId', '==', teamId),
-        where('uid', '==', memberUid)
-      );
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      console.log('Removendo membro:', memberUid);
       
-      const snapshot = await getDocs(membersQuery);
+      const memberRef = doc(db, 'teamMembers', memberUid);
+      const memberDoc = await getDoc(memberRef);
       
-      if (snapshot.empty) {
-        throw new Error('Membro não encontrado');
+      if (!memberDoc.exists() || memberDoc.data().teamId !== teamId) {
+        throw new Error('Membro não encontrado na equipe');
       }
       
-      await deleteDoc(snapshot.docs[0].ref);
+      await deleteDoc(memberRef);
       
-      console.log('Membro removido:', memberUid);
+      console.log('Membro removido com sucesso');
       return true;
     } catch (error) {
       console.error('Erro ao remover membro:', error);
-      return false;
+      throw error;
     }
   }
 
@@ -243,13 +315,19 @@ class AdminService {
   
   async createInvitation(teamId: string, email: string, role: TeamRole): Promise<TeamInvitation | null> {
     try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
       const userId = this.getCurrentUserId();
+      console.log('Criando convite para:', email);
       
       // Verificar se já existe convite pendente para este email
       const existingQuery = query(
         collection(db, 'invitations'),
         where('teamId', '==', teamId),
-        where('email', '==', email),
+        where('email', '==', email.toLowerCase()),
         where('status', '==', 'pending')
       );
       
@@ -264,7 +342,7 @@ class AdminService {
       expiresAt.setHours(expiresAt.getHours() + 72); // 72 horas
       
       const invitation = {
-        email,
+        email: email.toLowerCase(),
         teamId,
         role,
         token,
@@ -286,12 +364,19 @@ class AdminService {
       } as TeamInvitation;
     } catch (error) {
       console.error('Erro ao criar convite:', error);
-      return null;
+      throw error;
     }
   }
 
   async getTeamInvitations(teamId: string): Promise<TeamInvitation[]> {
     try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      console.log('Buscando convites para equipe:', teamId);
+      
       const invitationsQuery = query(
         collection(db, 'invitations'),
         where('teamId', '==', teamId),
@@ -299,22 +384,32 @@ class AdminService {
       );
       
       const snapshot = await getDocs(invitationsQuery);
+      console.log('Convites encontrados:', snapshot.size);
       
-      return snapshot.docs.map(doc => ({
+      const invitations = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
         expiresAt: doc.data().expiresAt?.toDate?.()?.toISOString() || doc.data().expiresAt,
         createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || doc.data().createdAt,
         usedAt: doc.data().usedAt?.toDate?.()?.toISOString() || doc.data().usedAt
       })) as TeamInvitation[];
+
+      return invitations;
     } catch (error) {
       console.error('Erro ao buscar convites:', error);
-      return [];
+      throw error;
     }
   }
 
   async cancelInvitation(inviteId: string): Promise<boolean> {
     try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      console.log('Cancelando convite:', inviteId);
+      
       const inviteRef = doc(db, 'invitations', inviteId);
       
       await updateDoc(inviteRef, {
@@ -322,22 +417,29 @@ class AdminService {
         cancelledAt: Timestamp.now()
       });
       
-      console.log('Convite cancelado:', inviteId);
+      console.log('Convite cancelado com sucesso');
       return true;
     } catch (error) {
       console.error('Erro ao cancelar convite:', error);
-      return false;
+      throw error;
     }
   }
 
   async acceptInvitation(inviteId: string): Promise<{ success: boolean; message: string; teamId?: string }> {
     try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        return { success: false, message: 'Usuário não autenticado' };
+      }
+
       const userId = this.getCurrentUserId();
       const user = auth.currentUser;
       
-      if (!user) {
-        return { success: false, message: 'Usuário não autenticado' };
+      if (!user || !user.email) {
+        return { success: false, message: 'Usuário não possui email válido' };
       }
+      
+      console.log('Aceitando convite:', inviteId);
       
       const inviteRef = doc(db, 'invitations', inviteId);
       const inviteDoc = await getDoc(inviteRef);
@@ -364,35 +466,18 @@ class AdminService {
         return { success: false, message: 'Convite já foi utilizado ou cancelado' };
       }
       
-      // Verificar se email confere (opcional - pode permitir aceitar com email diferente)
-      if (user.email !== invitation.email) {
-        const confirmDifferentEmail = confirm(
-          `Este convite foi enviado para ${invitation.email}, mas você está logado como ${user.email}. Deseja aceitar mesmo assim?`
-        );
-        
-        if (!confirmDifferentEmail) {
-          return { success: false, message: 'Convite cancelado pelo usuário' };
-        }
-      }
-      
       // Verificar se usuário já é membro
-      const existingMemberQuery = query(
-        collection(db, 'teamMembers'),
-        where('teamId', '==', invitation.teamId),
-        where('uid', '==', userId)
-      );
+      const existingMemberDoc = await getDoc(doc(db, 'teamMembers', userId));
       
-      const existingMemberSnapshot = await getDocs(existingMemberQuery);
-      
-      if (!existingMemberSnapshot.empty) {
+      if (existingMemberDoc.exists() && existingMemberDoc.data().teamId === invitation.teamId) {
         return { success: false, message: 'Você já é membro desta equipe' };
       }
       
       // Usar batch para operações atômicas
       const batch = writeBatch(db);
       
-      // Adicionar como membro
-      const memberRef = doc(collection(db, 'teamMembers'));
+      // Adicionar como membro usando o userId como ID do documento
+      const memberRef = doc(db, 'teamMembers', userId);
       batch.set(memberRef, {
         uid: userId,
         email: user.email,
@@ -412,7 +497,7 @@ class AdminService {
       
       await batch.commit();
       
-      console.log('Convite aceito com sucesso:', inviteId);
+      console.log('Convite aceito com sucesso');
       return { 
         success: true, 
         message: 'Convite aceito com sucesso!', 
@@ -427,6 +512,8 @@ class AdminService {
 
   async getInvitationById(inviteId: string): Promise<TeamInvitation | null> {
     try {
+      console.log('Buscando convite:', inviteId);
+      
       const inviteDoc = await getDoc(doc(db, 'invitations', inviteId));
       
       if (!inviteDoc.exists()) {
@@ -442,7 +529,7 @@ class AdminService {
       } as TeamInvitation;
     } catch (error) {
       console.error('Erro ao buscar convite:', error);
-      return null;
+      throw error;
     }
   }
 
@@ -452,22 +539,20 @@ class AdminService {
   
   async getUserPermissions(teamId: string): Promise<{ role: TeamRole; permissions: TeamPermissions } | null> {
     try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
       const userId = this.getCurrentUserId();
       
-      const memberQuery = query(
-        collection(db, 'teamMembers'),
-        where('teamId', '==', teamId),
-        where('uid', '==', userId),
-        where('status', '==', 'active')
-      );
+      const memberDoc = await getDoc(doc(db, 'teamMembers', userId));
       
-      const snapshot = await getDocs(memberQuery);
-      
-      if (snapshot.empty) {
+      if (!memberDoc.exists() || memberDoc.data().teamId !== teamId || memberDoc.data().status !== 'active') {
         return null;
       }
       
-      const memberData = snapshot.docs[0].data();
+      const memberData = memberDoc.data();
       
       return {
         role: memberData.role,
@@ -475,7 +560,7 @@ class AdminService {
       };
     } catch (error) {
       console.error('Erro ao buscar permissões:', error);
-      return null;
+      throw error;
     }
   }
 
@@ -521,10 +606,8 @@ Equipe LegalX
     const numbers = value.replace(/\D/g, '');
     
     if (numbers.length === 11) {
-      // Validação básica de CPF
       return this.validateCpf(numbers);
     } else if (numbers.length === 14) {
-      // Validação básica de CNPJ
       return this.validateCnpj(numbers);
     }
     
@@ -559,7 +642,6 @@ Equipe LegalX
   private validateCnpj(cnpj: string): boolean {
     if (cnpj.length !== 14) return false;
     
-    // Validação básica - implementação completa seria mais extensa
     const weights1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
     const weights2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
     
