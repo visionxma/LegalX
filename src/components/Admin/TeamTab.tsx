@@ -304,7 +304,7 @@ export default function TeamTab({ team }: TeamTabProps) {
         </ul>
         <p className="text-xs text-amber-600 mt-2">
           <strong>Nota:</strong> O envio automático de e-mails requer plano Blaze + serviço SMTP. 
-          No plano gratuito, use o botão "Enviar E-mail" para abrir seu cliente de e-mail.
+          No plano gratuito, use o botão "Enviar E-mail\" para abrir seu cliente de e-mail.
         </p>
       </div>
     </div>
