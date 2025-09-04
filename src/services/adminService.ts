@@ -56,7 +56,7 @@ class AdminService {
       const userId = this.getCurrentUserId();
       console.log('Buscando equipe para usuário:', userId);
       
-      // Buscar team onde o usuário é owner
+      // Primeiro, buscar team onde o usuário é owner
       const teamsQuery = query(
         collection(db, 'teams'),
         where('ownerUid', '==', userId)
@@ -192,12 +192,11 @@ class AdminService {
     }
   }
 
-  // REMOVIDO: uploadLogo (Firebase Storage não disponível no plano gratuito)
+  // LOGO: Apenas base64 (sem Firebase Storage)
   async uploadLogo(file: File, teamId: string): Promise<string | null> {
     try {
-      console.log('Upload de logo não disponível no plano gratuito');
+      console.log('Convertendo logo para base64 (sem Firebase Storage)');
       
-      // Converter para base64 como alternativa temporária
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -212,7 +211,7 @@ class AdminService {
         reader.readAsDataURL(file);
       });
     } catch (error) {
-      console.error('Erro no upload do logo:', error);
+      console.error('Erro ao processar logo:', error);
       return null;
     }
   }

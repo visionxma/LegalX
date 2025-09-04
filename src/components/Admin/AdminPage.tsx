@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeftIcon, CogIcon } from '@heroicons/react/24/outline';
-import { auth } from '../../firebase.config'; // IMPORT AUSENTE
+import { auth } from '../../firebase.config';
 import { adminService } from '../../services/adminService';
 import { Team } from '../../types/admin';
 import OfficeTab from './OfficeTab';
@@ -18,17 +18,7 @@ export default function AdminPage({ onBack }: AdminPageProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Aguardar o usuário estar carregado antes de tentar carregar dados
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user) {
-        loadTeamData();
-      } else {
-        setLoading(false);
-        setError('Usuário não autenticado');
-      }
-    });
-
-    return () => unsubscribe();
+    loadTeamData();
   }, []);
 
   const loadTeamData = async () => {
@@ -36,20 +26,46 @@ export default function AdminPage({ onBack }: AdminPageProps) {
       setLoading(true);
       setError(null);
       
+      // Aguardar autenticação do Firebase
+      if (!auth.currentUser) {
+        console.log('Aguardando autenticação...');
+        await new Promise((resolve) => {
+          const unsubscribe = auth.onAuthStateChanged((user) => {
+            unsubscribe();
+            resolve(user);
+          });
+        });
+      }
+
+      if (!auth.currentUser) {
+        throw new Error('Usuário não autenticado. Faça login novamente.');
+      }
+
+      console.log('Usuário autenticado:', auth.currentUser.uid);
       console.log('Carregando dados da equipe...');
+      
       const teamData = await adminService.getTeam();
       console.log('Dados da equipe carregados:', teamData);
       
       setTeam(teamData);
       
-      // Se não existe team, NÃO criar automaticamente
-      // Deixar o usuário criar manualmente através da interface
-      if (!teamData) {
-        console.log('Nenhuma equipe encontrada. Usuário deve criar uma.');
-      }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao carregar dados da administração:', error);
-      setError('Erro ao carregar dados da administração');
+      
+      // Tratamento de erro mais específico
+      let errorMessage = 'Erro ao carregar dados da administração';
+      
+      if (error.code === 'permission-denied') {
+        errorMessage = 'Sem permissão para acessar os dados. Verifique as regras do Firestore.';
+      } else if (error.code === 'unavailable') {
+        errorMessage = 'Serviço temporariamente indisponível. Tente novamente em alguns momentos.';
+      } else if (error.message.includes('não autenticado')) {
+        errorMessage = 'Sessão expirada. Faça login novamente.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -62,12 +78,13 @@ export default function AdminPage({ onBack }: AdminPageProps) {
   const handleCreateTeam = async () => {
     try {
       setLoading(true);
-      const user = auth.currentUser;
-      if (!user) {
-        setError('Usuário não autenticado');
-        return;
+      setError(null);
+      
+      if (!auth.currentUser) {
+        throw new Error('Usuário não autenticado');
       }
 
+      console.log('Criando nova equipe...');
       const newTeam = await adminService.createTeam({
         name: 'Meu Escritório',
         phones: [],
@@ -82,11 +99,11 @@ export default function AdminPage({ onBack }: AdminPageProps) {
         setTeam(newTeam);
         console.log('Equipe criada com sucesso:', newTeam);
       } else {
-        setError('Erro ao criar equipe');
+        throw new Error('Falha ao criar equipe');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao criar equipe:', error);
-      setError('Erro ao criar equipe');
+      setError(error.message || 'Erro ao criar equipe');
     } finally {
       setLoading(false);
     }
@@ -120,15 +137,28 @@ export default function AdminPage({ onBack }: AdminPageProps) {
         <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
           <h3 className="text-lg font-semibold text-red-800 mb-2">Erro</h3>
           <p className="text-red-600 mb-4">{error}</p>
-          <button
-            onClick={() => {
-              setError(null);
-              loadTeamData();
-            }}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-          >
-            Tentar Novamente
-          </button>
+          <div className="space-y-2">
+            <button
+              onClick={loadTeamData}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 mr-2"
+            >
+              Tentar Novamente
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+            >
+              Recarregar Página
+            </button>
+          </div>
+          
+          {/* Debug Info */}
+          <div className="mt-4 p-3 bg-gray-100 rounded text-left text-xs">
+            <p><strong>Debug:</strong></p>
+            <p>Usuário: {auth.currentUser?.uid || 'Não autenticado'}</p>
+            <p>Email: {auth.currentUser?.email || 'Não encontrado'}</p>
+            <p>Erro: {error}</p>
+          </div>
         </div>
       </div>
     );

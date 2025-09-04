@@ -17,12 +17,15 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Analytics (opcional, só funciona em produção com HTTPS)
-const analytics = getAnalytics(app);
+let analytics;
+try {
+  analytics = getAnalytics(app);
+} catch (error) {
+  console.log('Analytics não disponível em desenvolvimento');
+}
 
-// Serviços que vamos usar
+// Serviços que vamos usar (REMOVIDO STORAGE)
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-export { app };
-export { analytics };
-
+export { app, analytics };

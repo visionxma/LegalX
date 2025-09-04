@@ -113,9 +113,9 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Validar tamanho do arquivo (máximo 2MB)
-      if (file.size > 2 * 1024 * 1024) {
-        alert('O arquivo deve ter no máximo 2MB');
+      // Validar tamanho do arquivo (máximo 500KB para base64)
+      if (file.size > 500 * 1024) {
+        alert('O arquivo deve ter no máximo 500KB');
         return;
       }
 
@@ -155,13 +155,13 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
         const uploadedUrl = await adminService.uploadLogo(logoFile, team.id);
         if (uploadedUrl) {
           logoUrl = uploadedUrl;
-          console.log('Logo uploaded:', uploadedUrl);
+          console.log('Logo salvo em base64');
         }
       }
       
       const updateData = {
         ...data,
-        phones,
+        phones: phones.filter(p => p.number), // Só salvar telefones com número
         address,
         logoUrl
       };
@@ -253,7 +253,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                 Escolher Logo
               </label>
               <p className="text-xs text-gray-500 mt-1">
-                PNG, JPG ou SVG até 2MB
+                PNG, JPG ou SVG até 500KB
               </p>
             </div>
           </div>
