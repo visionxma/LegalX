@@ -11,9 +11,9 @@ const schema = yup.object({
   cpf: yup.string().required('CPF é obrigatório'),
   salary: yup.number().min(0, 'Salário deve ser positivo').required('Salário é obrigatório'),
   position: yup.string().required('Função é obrigatória'),
-  email: yup.string().email('Email inválido'),
-  phone: yup.string(),
-  address: yup.string(),
+  email: yup.string().email('Email inválido').nullable(),
+  phone: yup.string().nullable(),
+  address: yup.string().nullable(),
   status: yup.string().required('Status é obrigatório')
 });
 
@@ -31,35 +31,57 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
     register,
     handleSubmit,
     formState: { errors },
-    setValue
+    setValue,
+    reset
   } = useForm<Partial<Employee>>({
     resolver: yupResolver(schema),
-    defaultValues: employee || {
+    defaultValues: {
       status: 'Ativo',
-      salary: 0
+      salary: 0,
+      fullName: '',
+      cpf: '',
+      position: '',
+      email: '',
+      phone: '',
+      address: '',
+      ...employee
     }
   });
 
   useEffect(() => {
     if (employee) {
-      Object.keys(employee).forEach((key) => {
-        setValue(key as keyof Employee, employee[key as keyof Employee]);
+      reset({
+        ...employee
       });
       setPhotoPreview(employee.photo || '');
     }
-  }, [employee, setValue]);
+  }, [employee, reset]);
 
   const onSubmit = async (data: Partial<Employee>) => {
     if (loading) return;
 
     try {
       setLoading(true);
-      const employeeData = {
-        ...data,
-        photo: photoPreview
-      } as Omit<Employee, 'id' | 'createdAt'>;
+      
+      // Validação básica dos campos obrigatórios
+      if (!data.fullName?.trim() || !data.cpf?.trim() || !data.position?.trim()) {
+        alert('Por favor, preencha todos os campos obrigatórios.');
+        return;
+      }
 
-      if (employee) {
+      const employeeData = {
+        fullName: data.fullName.trim(),
+        cpf: data.cpf.replace(/\D/g, ''), // Remove formatação do CPF
+        salary: Number(data.salary) || 0,
+        position: data.position.trim(),
+        email: data.email?.trim() || '',
+        phone: data.phone?.trim() || '',
+        address: data.address?.trim() || '',
+        status: data.status || 'Ativo',
+        photo: photoPreview
+      };
+
+      if (employee?.id) {
         // Atualizar colaborador existente
         const updatedEmployee = await firestoreService.updateEmployee(employee.id, employeeData);
         
@@ -67,7 +89,7 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
           console.log('Colaborador atualizado com sucesso');
           onSave(updatedEmployee);
         } else {
-          alert('Erro ao atualizar colaborador');
+          throw new Error('Erro ao atualizar colaborador');
         }
       } else {
         // Criar novo colaborador
@@ -78,7 +100,8 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
       }
     } catch (error) {
       console.error('Erro ao salvar colaborador:', error);
-      alert('Erro ao salvar colaborador. Tente novamente.');
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      alert(`Erro ao salvar colaborador: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
@@ -87,21 +110,44 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Verificar tamanho do arquivo (máximo 2MB para Base64)
+      if (file.size > 2 * 1024 * 1024) {
+        alert('Arquivo muito grande. Escolha uma imagem menor que 2MB.');
+        return;
+      }
+
       const reader = new FileReader();
       reader.onload = (e) => {
-        setPhotoPreview(e.target?.result as string);
+        const result = e.target?.result as string;
+        setPhotoPreview(result);
+      };
+      reader.onerror = () => {
+        alert('Erro ao processar imagem. Tente novamente.');
       };
       reader.readAsDataURL(file);
     }
   };
 
   const formatCpf = (value: string) => {
-    return value
-      .replace(/\D/g, '')
+    const numbers = value.replace(/\D/g, '');
+    return numbers
       .replace(/(\d{3})(\d)/, '$1.$2')
       .replace(/(\d{3})(\d)/, '$1.$2')
       .replace(/(\d{3})(\d{1,2})/, '$1-$2')
       .replace(/(-\d{2})\d+?$/, '$1');
+  };
+
+  const formatPhone = (value: string) => {
+    const numbers = value.replace(/\D/g, '');
+    if (numbers.length <= 10) {
+      return numbers
+        .replace(/(\d{2})(\d)/, '($1) $2')
+        .replace(/(\d{4})(\d)/, '$1-$2');
+    } else {
+      return numbers
+        .replace(/(\d{2})(\d)/, '($1) $2')
+        .replace(/(\d{5})(\d)/, '$1-$2');
+    }
   };
 
   return (
@@ -139,6 +185,10 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
                     src={photoPreview}
                     alt="Preview"
                     className="w-24 h-24 rounded-full object-cover border-4 border-gray-200"
+                    onError={(e) => {
+                      console.error('Erro ao carregar imagem preview');
+                      setPhotoPreview('');
+                    }}
                   />
                 ) : (
                   <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center">
@@ -149,7 +199,7 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
               <div>
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/gif"
                   onChange={handlePhotoChange}
                   className="hidden"
                   id="photo-upload"
@@ -157,14 +207,24 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
                 />
                 <label
                   htmlFor="photo-upload"
-                  className={`cursor-pointer inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`cursor-pointer inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <PhotoIcon className="w-4 h-4 mr-2" />
                   Escolher Foto
                 </label>
                 <p className="text-xs text-gray-500 mt-1">
-                  JPG, PNG ou GIF até 5MB
+                  JPG, PNG ou GIF até 2MB
                 </p>
+                {photoPreview && (
+                  <button
+                    type="button"
+                    onClick={() => setPhotoPreview('')}
+                    className="text-red-600 hover:text-red-800 text-xs mt-1 block"
+                    disabled={loading}
+                  >
+                    Remover foto
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -180,7 +240,7 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
                 <input
                   {...register('fullName')}
                   type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="Nome completo do colaborador"
                   disabled={loading}
                 />
@@ -198,9 +258,11 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
                   type="text"
                   maxLength={14}
                   onChange={(e) => {
-                    e.target.value = formatCpf(e.target.value);
+                    const formatted = formatCpf(e.target.value);
+                    e.target.value = formatted;
+                    setValue('cpf', formatted);
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="000.000.000-00"
                   disabled={loading}
                 />
@@ -216,7 +278,7 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
                 <input
                   {...register('position')}
                   type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="Ex: Secretária, Assistente Jurídico"
                   disabled={loading}
                 />
@@ -230,11 +292,17 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
                   Salário (R$) *
                 </label>
                 <input
-                  {...register('salary', { valueAsNumber: true })}
+                  {...register('salary', { 
+                    valueAsNumber: true,
+                    setValueAs: (value) => {
+                      const num = parseFloat(value);
+                      return isNaN(num) ? 0 : num;
+                    }
+                  })}
                   type="number"
                   min="0"
                   step="0.01"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="0.00"
                   disabled={loading}
                 />
@@ -250,7 +318,7 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
                 <input
                   {...register('email')}
                   type="email"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="email@exemplo.com"
                   disabled={loading}
                 />
@@ -266,7 +334,13 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
                 <input
                   {...register('phone')}
                   type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  maxLength={15}
+                  onChange={(e) => {
+                    const formatted = formatPhone(e.target.value);
+                    e.target.value = formatted;
+                    setValue('phone', formatted);
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="(11) 99999-9999"
                   disabled={loading}
                 />
@@ -279,7 +353,7 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
                 <input
                   {...register('address')}
                   type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="Endereço completo"
                   disabled={loading}
                 />
@@ -291,7 +365,7 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
                 </label>
                 <select
                   {...register('status')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   disabled={loading}
                 >
                   <option value="Ativo">Ativo</option>
@@ -316,10 +390,17 @@ export default function EmployeeForm({ employee, onBack, onSave }: EmployeeFormP
             </button>
             <button
               type="submit"
-              className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+              className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center"
               disabled={loading}
             >
-              {loading ? 'Salvando...' : (employee ? 'Atualizar' : 'Salvar')} Colaborador
+              {loading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Salvando...
+                </>
+              ) : (
+                `${employee ? 'Atualizar' : 'Salvar'} Colaborador`
+              )}
             </button>
           </div>
         </div>

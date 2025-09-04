@@ -11,9 +11,9 @@ const schema = yup.object({
   cpf: yup.string().required('CPF é obrigatório'),
   oab: yup.string().required('OAB é obrigatória'),
   commission: yup.number().min(0, 'Comissão deve ser positiva').max(100, 'Comissão não pode ser maior que 100%').required('Comissão é obrigatória'),
-  email: yup.string().email('Email inválido'),
-  phone: yup.string(),
-  address: yup.string(),
+  email: yup.string().email('Email inválido').nullable(),
+  phone: yup.string().nullable(),
+  address: yup.string().nullable(),
   status: yup.string().required('Status é obrigatório')
 });
 
@@ -33,35 +33,59 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
     register,
     handleSubmit,
     formState: { errors },
-    setValue
+    setValue,
+    reset
   } = useForm<Partial<Lawyer>>({
     resolver: yupResolver(schema),
-    defaultValues: lawyer || {
+    defaultValues: {
       status: 'Ativo',
-      commission: 10
+      commission: 10,
+      fullName: '',
+      cpf: '',
+      oab: '',
+      email: '',
+      phone: '',
+      address: '',
+      ...lawyer
     }
   });
 
   useEffect(() => {
     if (lawyer) {
-      Object.keys(lawyer).forEach((key) => {
-        setValue(key as keyof Lawyer, lawyer[key as keyof Lawyer]);
+      reset({
+        ...lawyer
       });
       setSpecialties(lawyer.specialties || []);
       setPhotoPreview(lawyer.photo || '');
     }
-  }, [lawyer, setValue]);
+  }, [lawyer, reset]);
 
   const onSubmit = async (data: Partial<Lawyer>) => {
-    setLoading(true);
-    try {
-      const lawyerData = {
-        ...data,
-        specialties,
-        photo: photoPreview
-      } as Omit<Lawyer, 'id' | 'createdAt'>;
+    if (loading) return;
 
-      if (lawyer) {
+    try {
+      setLoading(true);
+
+      // Validação básica dos campos obrigatórios
+      if (!data.fullName?.trim() || !data.cpf?.trim() || !data.oab?.trim()) {
+        alert('Por favor, preencha todos os campos obrigatórios.');
+        return;
+      }
+
+      const lawyerData = {
+        fullName: data.fullName.trim(),
+        cpf: data.cpf.replace(/\D/g, ''), // Remove formatação do CPF
+        oab: data.oab.trim(),
+        commission: Number(data.commission) || 10,
+        email: data.email?.trim() || '',
+        phone: data.phone?.trim() || '',
+        address: data.address?.trim() || '',
+        status: data.status || 'Ativo',
+        specialties: specialties.filter(s => s.trim().length > 0),
+        photo: photoPreview
+      };
+
+      if (lawyer?.id) {
         // Atualizar advogado existente
         const updatedLawyer = await firestoreService.updateLawyer(lawyer.id, lawyerData);
         
@@ -69,7 +93,7 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
           console.log('Advogado atualizado com sucesso');
           onSave(updatedLawyer);
         } else {
-          alert('Erro ao atualizar advogado');
+          throw new Error('Erro ao atualizar advogado');
         }
       } else {
         // Criar novo advogado
@@ -80,15 +104,17 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
       }
     } catch (error) {
       console.error('Erro ao salvar advogado:', error);
-      alert('Erro ao salvar advogado. Tente novamente.');
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      alert(`Erro ao salvar advogado: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
   };
 
   const addSpecialty = () => {
-    if (newSpecialty.trim() && !specialties.includes(newSpecialty.trim())) {
-      setSpecialties([...specialties, newSpecialty.trim()]);
+    const trimmedSpecialty = newSpecialty.trim();
+    if (trimmedSpecialty && !specialties.includes(trimmedSpecialty)) {
+      setSpecialties([...specialties, trimmedSpecialty]);
       setNewSpecialty('');
     }
   };
@@ -100,21 +126,44 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Verificar tamanho do arquivo (máximo 2MB para Base64)
+      if (file.size > 2 * 1024 * 1024) {
+        alert('Arquivo muito grande. Escolha uma imagem menor que 2MB.');
+        return;
+      }
+
       const reader = new FileReader();
       reader.onload = (e) => {
-        setPhotoPreview(e.target?.result as string);
+        const result = e.target?.result as string;
+        setPhotoPreview(result);
+      };
+      reader.onerror = () => {
+        alert('Erro ao processar imagem. Tente novamente.');
       };
       reader.readAsDataURL(file);
     }
   };
 
   const formatCpf = (value: string) => {
-    return value
-      .replace(/\D/g, '')
+    const numbers = value.replace(/\D/g, '');
+    return numbers
       .replace(/(\d{3})(\d)/, '$1.$2')
       .replace(/(\d{3})(\d)/, '$1.$2')
       .replace(/(\d{3})(\d{1,2})/, '$1-$2')
       .replace(/(-\d{2})\d+?$/, '$1');
+  };
+
+  const formatPhone = (value: string) => {
+    const numbers = value.replace(/\D/g, '');
+    if (numbers.length <= 10) {
+      return numbers
+        .replace(/(\d{2})(\d)/, '($1) $2')
+        .replace(/(\d{4})(\d)/, '$1-$2');
+    } else {
+      return numbers
+        .replace(/(\d{2})(\d)/, '($1) $2')
+        .replace(/(\d{5})(\d)/, '$1-$2');
+    }
   };
 
   return (
@@ -152,6 +201,10 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                     src={photoPreview}
                     alt="Preview"
                     className="w-24 h-24 rounded-full object-cover border-4 border-gray-200"
+                    onError={(e) => {
+                      console.error('Erro ao carregar imagem preview');
+                      setPhotoPreview('');
+                    }}
                   />
                 ) : (
                   <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center">
@@ -162,7 +215,7 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
               <div>
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/gif"
                   onChange={handlePhotoChange}
                   className="hidden"
                   id="photo-upload"
@@ -170,14 +223,24 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                 />
                 <label
                   htmlFor="photo-upload"
-                  className="cursor-pointer inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                  className={`cursor-pointer inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <PhotoIcon className="w-4 h-4 mr-2" />
                   Escolher Foto
                 </label>
                 <p className="text-xs text-gray-500 mt-1">
-                  JPG, PNG ou GIF até 5MB
+                  JPG, PNG ou GIF até 2MB
                 </p>
+                {photoPreview && (
+                  <button
+                    type="button"
+                    onClick={() => setPhotoPreview('')}
+                    className="text-red-600 hover:text-red-800 text-xs mt-1 block"
+                    disabled={loading}
+                  >
+                    Remover foto
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -194,7 +257,7 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                   {...register('fullName')}
                   type="text"
                   disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="Nome completo do advogado"
                 />
                 {errors.fullName && (
@@ -212,9 +275,11 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                   maxLength={14}
                   disabled={loading}
                   onChange={(e) => {
-                    e.target.value = formatCpf(e.target.value);
+                    const formatted = formatCpf(e.target.value);
+                    e.target.value = formatted;
+                    setValue('cpf', formatted);
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="000.000.000-00"
                 />
                 {errors.cpf && (
@@ -230,7 +295,7 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                   {...register('oab')}
                   type="text"
                   disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="123456/SP"
                 />
                 {errors.oab && (
@@ -243,13 +308,19 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                   Comissão (%) *
                 </label>
                 <input
-                  {...register('commission', { valueAsNumber: true })}
+                  {...register('commission', { 
+                    valueAsNumber: true,
+                    setValueAs: (value) => {
+                      const num = parseFloat(value);
+                      return isNaN(num) ? 10 : num;
+                    }
+                  })}
                   type="number"
                   min="0"
                   max="100"
                   step="0.1"
                   disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="10.0"
                 />
                 {errors.commission && (
@@ -265,7 +336,7 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                   {...register('email')}
                   type="email"
                   disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="email@exemplo.com"
                 />
                 {errors.email && (
@@ -280,8 +351,14 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                 <input
                   {...register('phone')}
                   type="text"
+                  maxLength={15}
                   disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  onChange={(e) => {
+                    const formatted = formatPhone(e.target.value);
+                    e.target.value = formatted;
+                    setValue('phone', formatted);
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="(11) 99999-9999"
                 />
               </div>
@@ -294,7 +371,7 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                   {...register('address')}
                   type="text"
                   disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                   placeholder="Endereço completo"
                 />
               </div>
@@ -306,7 +383,7 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                 <select
                   {...register('status')}
                   disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                 >
                   <option value="Ativo">Ativo</option>
                   <option value="Inativo">Inativo</option>
@@ -329,16 +406,21 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                 type="text"
                 value={newSpecialty}
                 onChange={(e) => setNewSpecialty(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addSpecialty())}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addSpecialty();
+                  }
+                }}
                 disabled={loading}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                 placeholder="Ex: Direito Trabalhista"
               />
               <button
                 type="button"
                 onClick={addSpecialty}
-                disabled={loading}
-                className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                disabled={loading || !newSpecialty.trim()}
+                className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <PlusIcon className="w-4 h-4 mr-2" />
                 Adicionar

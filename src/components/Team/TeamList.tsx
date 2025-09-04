@@ -7,7 +7,6 @@ import {
   EyeIcon,
   PencilIcon,
   TrashIcon,
-  PlusIcon,
   UserIcon,
   BriefcaseIcon
 } from '@heroicons/react/24/outline';
@@ -48,46 +47,56 @@ export default function TeamList({
       setLoading(true);
       setError(null);
       
+      console.log('Iniciando carregamento dos dados da equipe...');
+      
       const [loadedLawyers, loadedEmployees] = await Promise.all([
-        firestoreService.getLawyers(),
-        firestoreService.getEmployees()
+        firestoreService.getLawyers().catch(error => {
+          console.warn('Erro ao carregar advogados:', error);
+          return [];
+        }),
+        firestoreService.getEmployees().catch(error => {
+          console.warn('Erro ao carregar colaboradores:', error);
+          return [];
+        })
       ]);
       
-      setLawyers(loadedLawyers);
-      setEmployees(loadedEmployees);
+      setLawyers(loadedLawyers || []);
+      setEmployees(loadedEmployees || []);
       console.log(`${loadedLawyers.length} advogados e ${loadedEmployees.length} colaboradores carregados`);
     } catch (error) {
       console.error('Erro ao carregar dados da equipe:', error);
-      setError('Erro ao carregar dados da equipe. Tente novamente.');
+      setError('Erro ao carregar dados da equipe. Verifique sua conexão e tente novamente.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteLawyer = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este advogado?')) {
+  const handleDeleteLawyer = async (id: string, name: string) => {
+    if (confirm(`Tem certeza que deseja excluir o advogado "${name}"?`)) {
       try {
         setLoading(true);
         await firestoreService.deleteLawyer(id);
-        await loadTeamData(); // Recarrega os dados após deletar
+        setLawyers(prev => prev.filter(lawyer => lawyer.id !== id));
+        console.log('Advogado excluído com sucesso');
       } catch (error) {
         console.error('Erro ao excluir advogado:', error);
-        setError('Erro ao excluir advogado. Tente novamente.');
+        alert('Erro ao excluir advogado. Tente novamente.');
       } finally {
         setLoading(false);
       }
     }
   };
 
-  const handleDeleteEmployee = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este colaborador?')) {
+  const handleDeleteEmployee = async (id: string, name: string) => {
+    if (confirm(`Tem certeza que deseja excluir o colaborador "${name}"?`)) {
       try {
         setLoading(true);
         await firestoreService.deleteEmployee(id);
-        await loadTeamData(); // Recarrega os dados após deletar
+        setEmployees(prev => prev.filter(employee => employee.id !== id));
+        console.log('Colaborador excluído com sucesso');
       } catch (error) {
         console.error('Erro ao excluir colaborador:', error);
-        setError('Erro ao excluir colaborador. Tente novamente.');
+        alert('Erro ao excluir colaborador. Tente novamente.');
       } finally {
         setLoading(false);
       }
@@ -95,9 +104,12 @@ export default function TeamList({
   };
 
   const filteredLawyers = lawyers.filter(lawyer => {
-    const matchesSearch = lawyer.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         lawyer.oab.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         lawyer.cpf.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase();
+    const matchesSearch = 
+      lawyer.fullName?.toLowerCase().includes(searchLower) ||
+      lawyer.oab?.toLowerCase().includes(searchLower) ||
+      lawyer.cpf?.toLowerCase().includes(searchLower) ||
+      lawyer.email?.toLowerCase().includes(searchLower);
     
     const matchesStatus = statusFilter === 'all' || lawyer.status === statusFilter;
     
@@ -105,9 +117,12 @@ export default function TeamList({
   });
 
   const filteredEmployees = employees.filter(employee => {
-    const matchesSearch = employee.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         employee.position.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         employee.cpf.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase();
+    const matchesSearch = 
+      employee.fullName?.toLowerCase().includes(searchLower) ||
+      employee.position?.toLowerCase().includes(searchLower) ||
+      employee.cpf?.toLowerCase().includes(searchLower) ||
+      employee.email?.toLowerCase().includes(searchLower);
     
     const matchesStatus = statusFilter === 'all' || employee.status === statusFilter;
     
@@ -115,14 +130,22 @@ export default function TeamList({
   });
 
   const formatDate = (dateString: string) => {
-    return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
+    try {
+      return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
+    } catch {
+      return 'Data inválida';
+    }
   };
 
   const formatCpf = (cpf: string) => {
-    return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+    if (!cpf) return 'N/A';
+    const numbers = cpf.replace(/\D/g, '');
+    if (numbers.length !== 11) return cpf;
+    return numbers.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
   };
 
   const formatCurrency = (value: number) => {
+    if (typeof value !== 'number' || isNaN(value)) return 'R$ 0,00';
     return new Intl.NumberFormat('pt-BR', {
       style: 'currency',
       currency: 'BRL'
@@ -147,7 +170,7 @@ export default function TeamList({
               <div className="mt-4">
                 <button
                   type="button"
-                  className="bg-red-100 px-2 py-1.5 rounded-md text-sm font-medium text-red-800 hover:bg-red-200"
+                  className="bg-red-100 px-2 py-1.5 rounded-md text-sm font-medium text-red-800 hover:bg-red-200 transition-colors"
                   onClick={() => {
                     setError(null);
                     loadTeamData();
@@ -265,8 +288,12 @@ export default function TeamList({
                         {lawyer.photo ? (
                           <img
                             src={lawyer.photo}
-                            alt={lawyer.fullName}
+                            alt={lawyer.fullName || 'Advogado'}
                             className="w-12 h-12 rounded-full object-cover mr-3"
+                            onError={(e) => {
+                              console.warn('Erro ao carregar foto do advogado');
+                              e.currentTarget.style.display = 'none';
+                            }}
                           />
                         ) : (
                           <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mr-3">
@@ -274,8 +301,8 @@ export default function TeamList({
                           </div>
                         )}
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900">{lawyer.fullName}</h3>
-                          <p className="text-sm text-gray-500">OAB: {lawyer.oab}</p>
+                          <h3 className="text-lg font-semibold text-gray-900">{lawyer.fullName || 'Nome não informado'}</h3>
+                          <p className="text-sm text-gray-500">OAB: {lawyer.oab || 'Não informado'}</p>
                         </div>
                       </div>
                       <span
@@ -285,7 +312,7 @@ export default function TeamList({
                             : 'bg-red-100 text-red-800'
                         }`}
                       >
-                        {lawyer.status}
+                        {lawyer.status || 'Indefinido'}
                       </span>
                     </div>
 
@@ -297,12 +324,12 @@ export default function TeamList({
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-500">Comissão:</span>
-                        <span className="text-gray-900">{lawyer.commission}%</span>
+                        <span className="text-gray-900">{lawyer.commission || 0}%</span>
                       </div>
                       {lawyer.email && (
                         <div className="flex justify-between text-sm">
                           <span className="text-gray-500">Email:</span>
-                          <span className="text-gray-900 truncate">{lawyer.email}</span>
+                          <span className="text-gray-900 truncate" title={lawyer.email}>{lawyer.email}</span>
                         </div>
                       )}
                       <div className="flex justify-between text-sm">
@@ -320,12 +347,16 @@ export default function TeamList({
                             <span
                               key={index}
                               className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full"
+                              title={specialty}
                             >
                               {specialty}
                             </span>
                           ))}
                           {lawyer.specialties.length > 3 && (
-                            <span className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded-full">
+                            <span 
+                              className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded-full"
+                              title={`Mais especialidades: ${lawyer.specialties.slice(3).join(', ')}`}
+                            >
                               +{lawyer.specialties.length - 3}
                             </span>
                           )}
@@ -337,21 +368,21 @@ export default function TeamList({
                     <div className="flex items-center justify-end space-x-2 pt-4 border-t">
                       <button
                         onClick={() => onViewLawyer(lawyer)}
-                        className="text-blue-600 hover:text-blue-900 p-2 rounded hover:bg-blue-50"
+                        className="text-blue-600 hover:text-blue-900 p-2 rounded hover:bg-blue-50 transition-colors"
                         title="Visualizar"
                       >
                         <EyeIcon className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => onEditLawyer(lawyer)}
-                        className="text-amber-600 hover:text-amber-900 p-2 rounded hover:bg-amber-50"
+                        className="text-amber-600 hover:text-amber-900 p-2 rounded hover:bg-amber-50 transition-colors"
                         title="Editar"
                       >
                         <PencilIcon className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDeleteLawyer(lawyer.id)}
-                        className="text-red-600 hover:text-red-900 p-2 rounded hover:bg-red-50"
+                        onClick={() => handleDeleteLawyer(lawyer.id, lawyer.fullName || 'Advogado')}
+                        className="text-red-600 hover:text-red-900 p-2 rounded hover:bg-red-50 transition-colors"
                         title="Excluir"
                         disabled={loading}
                       >
@@ -373,8 +404,12 @@ export default function TeamList({
                         {employee.photo ? (
                           <img
                             src={employee.photo}
-                            alt={employee.fullName}
+                            alt={employee.fullName || 'Colaborador'}
                             className="w-12 h-12 rounded-full object-cover mr-3"
+                            onError={(e) => {
+                              console.warn('Erro ao carregar foto do colaborador');
+                              e.currentTarget.style.display = 'none';
+                            }}
                           />
                         ) : (
                           <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mr-3">
@@ -382,8 +417,8 @@ export default function TeamList({
                           </div>
                         )}
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900">{employee.fullName}</h3>
-                          <p className="text-sm text-gray-500">{employee.position}</p>
+                          <h3 className="text-lg font-semibold text-gray-900">{employee.fullName || 'Nome não informado'}</h3>
+                          <p className="text-sm text-gray-500">{employee.position || 'Função não informada'}</p>
                         </div>
                       </div>
                       <span
@@ -393,7 +428,7 @@ export default function TeamList({
                             : 'bg-red-100 text-red-800'
                         }`}
                       >
-                        {employee.status}
+                        {employee.status || 'Indefinido'}
                       </span>
                     </div>
 
@@ -410,7 +445,7 @@ export default function TeamList({
                       {employee.email && (
                         <div className="flex justify-between text-sm">
                           <span className="text-gray-500">Email:</span>
-                          <span className="text-gray-900 truncate">{employee.email}</span>
+                          <span className="text-gray-900 truncate" title={employee.email}>{employee.email}</span>
                         </div>
                       )}
                       <div className="flex justify-between text-sm">
@@ -423,21 +458,21 @@ export default function TeamList({
                     <div className="flex items-center justify-end space-x-2 pt-4 border-t">
                       <button
                         onClick={() => onViewEmployee(employee)}
-                        className="text-blue-600 hover:text-blue-900 p-2 rounded hover:bg-blue-50"
+                        className="text-blue-600 hover:text-blue-900 p-2 rounded hover:bg-blue-50 transition-colors"
                         title="Visualizar"
                       >
                         <EyeIcon className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => onEditEmployee(employee)}
-                        className="text-amber-600 hover:text-amber-900 p-2 rounded hover:bg-amber-50"
+                        className="text-amber-600 hover:text-amber-900 p-2 rounded hover:bg-amber-50 transition-colors"
                         title="Editar"
                       >
                         <PencilIcon className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDeleteEmployee(employee.id)}
-                        className="text-red-600 hover:text-red-900 p-2 rounded hover:bg-red-50"
+                        onClick={() => handleDeleteEmployee(employee.id, employee.fullName || 'Colaborador')}
+                        className="text-red-600 hover:text-red-900 p-2 rounded hover:bg-red-50 transition-colors"
                         title="Excluir"
                         disabled={loading}
                       >
@@ -450,7 +485,8 @@ export default function TeamList({
             </div>
           )}
           
-          {activeTab === 'lawyers' && filteredLawyers.length === 0 && (
+          {/* Empty States */}
+          {activeTab === 'lawyers' && filteredLawyers.length === 0 && !loading && (
             <div className="text-center py-12">
               <UserIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-500">
@@ -461,7 +497,7 @@ export default function TeamList({
               </p>
             </div>
           )}
-          {activeTab === 'employees' && filteredEmployees.length === 0 && (
+          {activeTab === 'employees' && filteredEmployees.length === 0 && !loading && (
             <div className="text-center py-12">
               <BriefcaseIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-500">
