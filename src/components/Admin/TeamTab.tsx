@@ -1,3 +1,10 @@
+// DIFF: src/components/Admin/TeamTab.tsx
+// Principais mudanças:
+// - createInvitation agora retorna link direto
+// - Interface mostra link completo para copiar
+// - Instruções para envio manual
+// - Remoção de dependência de tokens temporários
+
 import React, { useState, useEffect } from 'react';
 import { Team, TeamInvitation } from '../../types/admin';
 import { adminService } from '../../services/adminService';
@@ -21,22 +28,15 @@ interface TeamTabProps {
   team: Team | null;
 }
 
-interface InviteWithToken {
-  invitation: TeamInvitation;
-  token: string;
-  link: string;
-}
-
 export default function TeamTab({ team }: TeamTabProps) {
   const [invitations, setInvitations] = useState<TeamInvitation[]>([]);
-  const [inviteTokens, setInviteTokens] = useState<Map<string, string>>(new Map());
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'editor' | 'viewer'>('viewer');
   const [loading, setLoading] = useState(false);
   const [loadingInvites, setLoadingInvites] = useState(true);
-  const [expandedInvite, setExpandedInvite] = useState<string | null>(null);
-  const [copiedInvite, setCopiedInvite] = useState<string | null>(null);
+  const [lastCreatedLink, setLastCreatedLink] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     if (team) {
@@ -58,6 +58,7 @@ export default function TeamTab({ team }: TeamTabProps) {
     }
   };
 
+  // ATUALIZADO: handleCreateInvite agora recebe link direto
   const handleCreateInvite = async () => {
     if (!team || !inviteEmail.trim()) return;
     
@@ -67,18 +68,14 @@ export default function TeamTab({ team }: TeamTabProps) {
       const result = await adminService.createInvitation(team.id, inviteEmail.trim(), inviteRole);
       
       if (result) {
-        // Salvar token temporariamente para mostrar link
-        setInviteTokens(prev => new Map(prev.set(result.invitation.id, result.token)));
+        setLastCreatedLink(result.link);
         
         await loadInvitations();
         setShowInviteForm(false);
         setInviteEmail('');
         setInviteRole('viewer');
         
-        // Expandir automaticamente o convite recém criado para mostrar o link
-        setExpandedInvite(result.invitation.id);
-        
-        alert('Convite criado com sucesso! Use o botão "Ver Link" para copiar o link seguro.');
+        alert('Convite criado com sucesso! Copie o link seguro para enviar.');
       } else {
         alert('Erro ao criar convite. Verifique se o e-mail já não foi convidado.');
       }
@@ -103,12 +100,6 @@ export default function TeamTab({ team }: TeamTabProps) {
         const success = await adminService.cancelInvitation(inviteId);
         if (success) {
           await loadInvitations();
-          // Remover token da memória
-          setInviteTokens(prev => {
-            const updated = new Map(prev);
-            updated.delete(inviteId);
-            return updated;
-          });
         }
       } catch (error) {
         console.error('Erro ao cancelar convite:', error);
@@ -117,38 +108,12 @@ export default function TeamTab({ team }: TeamTabProps) {
     }
   };
 
-  const handleRevokeInvite = async (inviteId: string) => {
-    if (confirm('Tem certeza que deseja revogar este convite? Esta ação não pode ser desfeita.')) {
-      try {
-        const success = await adminService.revokeInvitation(inviteId);
-        if (success) {
-          await loadInvitations();
-          setInviteTokens(prev => {
-            const updated = new Map(prev);
-            updated.delete(inviteId);
-            return updated;
-          });
-        }
-      } catch (error) {
-        console.error('Erro ao revogar convite:', error);
-        alert('Erro ao revogar convite.');
-      }
-    }
-  };
-
-  const copyInviteLink = async (inviteId: string) => {
-    const token = inviteTokens.get(inviteId);
-    if (!token) {
-      alert('Token não disponível. Este link só pode ser copiado logo após a criação do convite por segurança.');
-      return;
-    }
-
-    const link = adminService.generateInviteLink(inviteId, token);
-    
+  // NOVO: Copiar link seguro
+  const copyInviteLink = async (link: string) => {
     try {
       await navigator.clipboard.writeText(link);
-      setCopiedInvite(inviteId);
-      setTimeout(() => setCopiedInvite(null), 2000);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
     } catch (error) {
       console.error('Erro ao copiar:', error);
       // Fallback para browsers sem clipboard API
@@ -158,8 +123,8 @@ export default function TeamTab({ team }: TeamTabProps) {
       textarea.select();
       try {
         document.execCommand('copy');
-        setCopiedInvite(inviteId);
-        setTimeout(() => setCopiedInvite(null), 2000);
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 2000);
       } catch (e) {
         alert('Não foi possível copiar automaticamente. Link: ' + link);
       }
@@ -167,20 +132,27 @@ export default function TeamTab({ team }: TeamTabProps) {
     }
   };
 
-  const openMailto = (invitation: TeamInvitation) => {
-    const token = inviteTokens.get(invitation.id);
-    if (!token) {
-      alert('Token não disponível para envio de e-mail. Copie o link manualmente.');
-      return;
-    }
+  // NOVO: Abrir mailto com link
+  const openMailto = (email: string, link: string) => {
+    const subject = encodeURIComponent(`Convite para ${team?.name} - LegalX`);
+    const body = encodeURIComponent(`
+Olá!
 
-    const inviteLink = adminService.generateInviteLink(invitation.id, token);
-    const mailtoLink = adminService.generateMailtoLink(invitation.email, inviteLink, team?.name || 'LegalX');
+Você foi convidado(a) para fazer parte da equipe "${team?.name}" no LegalX - Sistema de Gestão Jurídica.
+
+Para aceitar o convite, clique no link abaixo:
+${link}
+
+Este convite expira em 72 horas.
+
+Se você ainda não possui uma conta, será direcionado para criar uma.
+
+Atenciosamente,
+Equipe LegalX
+    `.trim());
+    
+    const mailtoLink = `mailto:${email}?subject=${subject}&body=${body}`;
     window.open(mailtoLink, '_blank');
-  };
-
-  const toggleExpandInvite = (inviteId: string) => {
-    setExpandedInvite(expandedInvite === inviteId ? null : inviteId);
   };
 
   const getStatusIcon = (status: string) => {
@@ -251,7 +223,7 @@ export default function TeamTab({ team }: TeamTabProps) {
     const now = new Date();
     const expiry = new Date(expiresAt);
     const hoursUntilExpiry = (expiry.getTime() - now.getTime()) / (1000 * 60 * 60);
-    return hoursUntilExpiry <= 6 && hoursUntilExpiry > 0; // Últimas 6 horas
+    return hoursUntilExpiry <= 6 && hoursUntilExpiry > 0;
   };
 
   if (!team) {
@@ -268,7 +240,7 @@ export default function TeamTab({ team }: TeamTabProps) {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Gerenciar Convites</h3>
-          <p className="text-gray-600">Convide pessoas para fazer parte da sua equipe com links seguros</p>
+          <p className="text-gray-600">Convide pessoas com links seguros que expiram automaticamente</p>
         </div>
         <button
           onClick={() => setShowInviteForm(!showInviteForm)}
@@ -283,7 +255,7 @@ export default function TeamTab({ team }: TeamTabProps) {
       {/* Invite Form */}
       {showInviteForm && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-          <h4 className="text-md font-semibold text-gray-900 mb-4">Criar Novo Convite</h4>
+          <h4 className="text-md font-semibold text-gray-900 mb-4">Criar Novo Convite Seguro</h4>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div className="md:col-span-2">
@@ -341,10 +313,69 @@ export default function TeamTab({ team }: TeamTabProps) {
               ) : (
                 <>
                   <ShieldCheckIcon className="w-4 h-4 mr-2" />
-                  Criar Convite Seguro
+                  Criar Link Seguro
                 </>
               )}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* NOVO: Link recém-criado */}
+      {lastCreatedLink && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+          <div className="flex items-start space-x-3">
+            <CheckCircleIcon className="w-6 h-6 text-green-600 mt-1" />
+            <div className="flex-1">
+              <h4 className="text-md font-semibold text-green-900 mb-2">
+                Convite Criado com Sucesso!
+              </h4>
+              <p className="text-sm text-green-700 mb-4">
+                Copie o link seguro abaixo e envie para o convidado:
+              </p>
+              
+              <div className="bg-white border border-green-200 rounded-lg p-3 mb-4">
+                <div className="flex items-center justify-between">
+                  <code className="text-xs text-gray-800 break-all flex-1 mr-2">
+                    {lastCreatedLink}
+                  </code>
+                  <button
+                    onClick={() => copyInviteLink(lastCreatedLink)}
+                    className="flex items-center px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors"
+                  >
+                    <ClipboardDocumentIcon className="w-3 h-3 mr-1" />
+                    {copiedLink ? 'Copiado!' : 'Copiar'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => openMailto(inviteEmail, lastCreatedLink)}
+                  className="flex items-center px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <EnvelopeIcon className="w-4 h-4 mr-2" />
+                  Abrir E-mail
+                </button>
+                
+                <button
+                  onClick={() => setLastCreatedLink(null)}
+                  className="flex items-center px-3 py-2 bg-gray-600 text-white text-sm rounded-lg hover:bg-gray-700 transition-colors"
+                >
+                  <XMarkIcon className="w-4 h-4 mr-2" />
+                  Fechar
+                </button>
+              </div>
+
+              <div className="mt-3 text-xs text-green-600">
+                <p><strong>⚠️ Importante:</strong></p>
+                <ul className="list-disc list-inside space-y-1">
+                  <li>Este link expira em <strong>72 horas</strong></li>
+                  <li>Só pode ser usado pelo e-mail especificado</li>
+                  <li>Contém token de segurança único</li>
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -395,80 +426,16 @@ export default function TeamTab({ team }: TeamTabProps) {
                     </span>
                     
                     {invitation.status === 'pending' && (
-                      <div className="flex items-center space-x-1">
-                        <button
-                          onClick={() => toggleExpandInvite(invitation.id)}
-                          className="flex items-center px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
-                          title="Ver opções"
-                        >
-                          <LinkIcon className="w-3 h-3 mr-1" />
-                          {expandedInvite === invitation.id ? 'Ocultar' : 'Ver Link'}
-                        </button>
-                        
-                        <button
-                          onClick={() => handleCancelInvite(invitation.id)}
-                          className="flex items-center px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors"
-                          title="Cancelar convite"
-                        >
-                          <XMarkIcon className="w-3 h-3" />
-                        </button>
-                      </div>
-                    )}
-
-                    {invitation.status === 'accepted' && (
                       <button
-                        onClick={() => handleRevokeInvite(invitation.id)}
+                        onClick={() => handleCancelInvite(invitation.id)}
                         className="flex items-center px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors"
-                        title="Revogar acesso"
+                        title="Cancelar convite"
                       >
-                        <TrashIcon className="w-3 h-3" />
+                        <XMarkIcon className="w-3 h-3" />
                       </button>
                     )}
                   </div>
                 </div>
-
-                {/* Expanded Actions */}
-                {expandedInvite === invitation.id && invitation.status === 'pending' && (
-                  <div className="mt-4 pt-4 border-t border-gray-100">
-                    <div className="space-y-3">
-                      {inviteTokens.has(invitation.id) ? (
-                        <>
-                          <div className="flex items-center space-x-2">
-                            <button
-                              onClick={() => copyInviteLink(invitation.id)}
-                              className="flex items-center px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
-                            >
-                              <ClipboardDocumentIcon className="w-4 h-4 mr-2" />
-                              {copiedInvite === invitation.id ? 'Link Copiado!' : 'Copiar Link Seguro'}
-                            </button>
-                            
-                            <button
-                              onClick={() => openMailto(invitation)}
-                              className="flex items-center px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
-                            >
-                              <EnvelopeIcon className="w-4 h-4 mr-2" />
-                              Abrir E-mail
-                            </button>
-                          </div>
-
-                          <div className="text-xs text-gray-600 bg-gray-50 p-3 rounded">
-                            <p><strong>Link seguro disponível</strong></p>
-                            <p>Este link contém um token único e seguro que expira em 72 horas.</p>
-                            <p className="mt-1 text-amber-600">
-                              <strong>Importante:</strong> O link completo só está disponível logo após a criação por segurança.
-                            </p>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="text-xs text-gray-500 bg-amber-50 border border-amber-200 p-3 rounded">
-                          <p><strong>Token de segurança não disponível</strong></p>
-                          <p>Por segurança, o token do convite só está disponível imediatamente após a criação.</p>
-                          <p className="mt-1">Para reenviar, cancele este convite e crie um novo.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
 
                 {/* Accepted/Used Info */}
                 {invitation.status === 'accepted' && invitation.usedAt && (
@@ -476,6 +443,15 @@ export default function TeamTab({ team }: TeamTabProps) {
                     <p className="text-xs text-green-600">
                       ✓ Aceito em {formatDate(invitation.usedAt)}
                       {invitation.acceptedBy && <span className="text-gray-500"> por {invitation.acceptedBy}</span>}
+                    </p>
+                  </div>
+                )}
+
+                {/* Warning para convites expirados */}
+                {invitation.status === 'expired' && (
+                  <div className="mt-3 pt-3 border-t border-gray-100">
+                    <p className="text-xs text-red-600">
+                      ⚠️ Convite expirado. Crie um novo convite se necessário.
                     </p>
                   </div>
                 )}
@@ -492,27 +468,29 @@ export default function TeamTab({ team }: TeamTabProps) {
           Sistema de Convites Seguros
         </h4>
         <ul className="text-sm text-amber-700 space-y-1">
-          <li>• Cada convite possui um token único e criptografado</li>
-          <li>• Links expiram automaticamente em 72 horas</li>
-          <li>• Tokens só são visíveis imediatamente após a criação</li>
-          <li>• Usuários precisam fazer login com o e-mail correto para aceitar</li>
-          <li>• Convites são salvos automaticamente para usuários não autenticados</li>
+          <li>• Cada convite possui um <strong>token único criptografado</strong></li>
+          <li>• Links expiram automaticamente em <strong>72 horas</strong></li>
+          <li>• Validação de e-mail: só funciona com o e-mail correto</li>
+          <li>• Tokens não são salvos no banco - apenas hash SHA-256</li>
+          <li>• Usuários não autenticados podem ver o convite mas devem fazer login para aceitar</li>
         </ul>
-        <p className="text-xs text-amber-600 mt-3">
-          <strong>Dica:</strong> Para reenviar um convite, cancele o atual e crie um novo para gerar um novo link seguro.
-        </p>
+        <div className="mt-3 p-2 bg-amber-100 rounded text-xs text-amber-800">
+          <p><strong>Como funciona:</strong></p>
+          <p>1. Crie o convite → 2. Copie o link seguro → 3. Envie via e-mail/WhatsApp → 4. Convidado clica e faz login → 5. Convite é validado e aceito automaticamente</p>
+        </div>
       </div>
 
-      {/* Plano Spark Notice */}
+      {/* NOVO: Manual sending instructions */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h4 className="text-sm font-semibold text-blue-800 mb-2">💡 Funcionalidade Completa no Plano Gratuito</h4>
-        <p className="text-sm text-blue-700">
-          O sistema de convites funciona completamente no plano Spark (gratuito). 
-          Use o botão "Abrir E-mail" para enviar via seu cliente de e-mail padrão.
-        </p>
-        <p className="text-xs text-blue-600 mt-2">
-          Para envio automático de e-mails, considere upgradar para o plano Blaze + configurar função Cloud.
-        </p>
+        <h4 className="text-sm font-semibold text-blue-800 mb-2">💡 Como Enviar Convites</h4>
+        <div className="text-sm text-blue-700 space-y-2">
+          <p><strong>Opção 1:</strong> Use o botão "Abrir E-mail" para enviar via seu cliente de e-mail padrão</p>
+          <p><strong>Opção 2:</strong> Copie o link e envie via WhatsApp, Telegram, ou qualquer mensageiro</p>
+          <p><strong>Opção 3:</strong> Copie o link e cole em seu cliente de e-mail personalizado</p>
+        </div>
+        <div className="mt-2 text-xs text-blue-600">
+          <p>⚠️ <strong>Importante:</strong> Cada link funciona apenas para o e-mail especificado e expira em 72h. Não compartilhe links entre pessoas diferentes.</p>
+        </div>
       </div>
     </div>
   );
