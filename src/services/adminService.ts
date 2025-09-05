@@ -11,10 +11,22 @@ import {
   orderBy,
   Timestamp,
   writeBatch,
-  setDoc
+  setDoc,
+  runTransaction,
+  limit
 } from 'firebase/firestore';
 import { auth, db } from '../firebase.config';
-import { Team, TeamMember, TeamInvitation, TeamRole, TeamPermissions, DEFAULT_PERMISSIONS } from '../types/admin';
+import { 
+  Team, 
+  TeamMember, 
+  TeamInvitation, 
+  TeamRole, 
+  TeamPermissions, 
+  DEFAULT_PERMISSIONS,
+  PendingInvite,
+  InviteValidationResult,
+  InviteOperationResponse
+} from '../types/admin';
 
 class AdminService {
   
@@ -40,13 +52,63 @@ class AdminService {
     });
   }
 
+  // CORREÇÃO: Geração de token seguro com hash SHA-256 real
+  private async generateSecureToken(): Promise<{ token: string; hash: string }> {
+    // Gerar token aleatório de 64 caracteres hex
+    const token = crypto.getRandomValues(new Uint8Array(32))
+      .reduce((acc, byte) => acc + byte.toString(16).padStart(2, '0'), '');
+    
+    // Hash do token usando SHA-256
+    const encoder = new TextEncoder();
+    const data = encoder.encode(token);
+    
+    try {
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      
+      return { token, hash };
+    } catch (error) {
+      console.error('Erro ao gerar hash SHA-256:', error);
+      // Fallback para hash simples em caso de erro
+      const simpleHash = this.hashTokenSimple(token);
+      return { token, hash: simpleHash };
+    }
+  }
+
+  // Hash SHA-256 para validação de token (async)
+  private async hashToken(token: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(token);
+    
+    try {
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (error) {
+      console.error('Erro ao gerar hash SHA-256:', error);
+      // Fallback para hash simples
+      return this.hashTokenSimple(token);
+    }
+  }
+
+  // Fallback hash simples (mantido para compatibilidade)
+  private hashTokenSimple(token: string): string {
+    let hash = 0;
+    for (let i = 0; i < token.length; i++) {
+      const char = token.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash).toString(36) + Date.now().toString(36);
+  }
+
   /**
-   * TEAM MANAGEMENT
+   * TEAM MANAGEMENT - Mantido igual
    */
   
   async getTeam(): Promise<Team | null> {
     try {
-      // Aguardar autenticação
       const isAuthenticated = await this.waitForAuth();
       if (!isAuthenticated) {
         console.log('Usuário não autenticado');
@@ -76,11 +138,18 @@ class AdminService {
         return teamData;
       }
       
-      // Se não é owner, verificar se é membro
-      const memberDoc = await getDoc(doc(db, 'teamMembers', userId));
+      // Buscar em múltiplas memberships
+      const membersQuery = query(
+        collection(db, 'teamMembers'),
+        where('uid', '==', userId),
+        where('status', '==', 'active'),
+        limit(1) // Por enquanto, pegar a primeira equipe ativa
+      );
       
-      if (memberDoc.exists() && memberDoc.data().status === 'active') {
-        const memberData = memberDoc.data();
+      const memberSnapshot = await getDocs(membersQuery);
+      
+      if (!memberSnapshot.empty) {
+        const memberData = memberSnapshot.docs[0].data();
         const teamId = memberData.teamId;
         console.log('Usuário é membro da equipe:', teamId);
         
@@ -134,8 +203,9 @@ class AdminService {
       const teamRef = await addDoc(collection(db, 'teams'), newTeam);
       console.log('Team criado com ID:', teamRef.id);
       
-      // Adicionar owner como membro usando o userId como documento ID
-      await setDoc(doc(db, 'teamMembers', userId), {
+      // Usar subcoleção com ID único para permitir múltiplas memberships
+      const memberRef = doc(collection(db, 'teamMembers'));
+      await setDoc(memberRef, {
         uid: userId,
         email: user.email,
         teamId: teamRef.id,
@@ -143,7 +213,8 @@ class AdminService {
         permissions: DEFAULT_PERMISSIONS.owner,
         status: 'active',
         addedAt: Timestamp.now(),
-        addedBy: userId
+        addedBy: userId,
+        lastActiveAt: Timestamp.now()
       });
 
       console.log('Owner adicionado como membro');
@@ -175,7 +246,6 @@ class AdminService {
         updatedAt: Timestamp.now()
       };
 
-      // Remover campos undefined/null do payload
       Object.keys(updatePayload).forEach(key => {
         if (updatePayload[key] === undefined || updatePayload[key] === null) {
           delete updatePayload[key];
@@ -192,7 +262,6 @@ class AdminService {
     }
   }
 
-  // LOGO: Apenas base64 (sem Firebase Storage)
   async uploadLogo(file: File, teamId: string): Promise<string | null> {
     try {
       console.log('Convertendo logo para base64 (sem Firebase Storage)');
@@ -217,7 +286,7 @@ class AdminService {
   }
 
   /**
-   * TEAM MEMBERS
+   * TEAM MEMBERS - Atualizado para múltiplas memberships
    */
   
   async getTeamMembers(teamId: string): Promise<TeamMember[]> {
@@ -239,8 +308,10 @@ class AdminService {
       console.log('Membros encontrados:', snapshot.size);
       
       const members = snapshot.docs.map(doc => ({
+        id: doc.id, // ID do documento
         ...doc.data(),
-        addedAt: doc.data().addedAt?.toDate?.()?.toISOString() || doc.data().addedAt
+        addedAt: doc.data().addedAt?.toDate?.()?.toISOString() || doc.data().addedAt,
+        lastActiveAt: doc.data().lastActiveAt?.toDate?.()?.toISOString() || doc.data().lastActiveAt
       })) as TeamMember[];
 
       return members;
@@ -259,20 +330,31 @@ class AdminService {
 
       console.log('Atualizando permissões do membro:', memberUid);
       
-      const memberRef = doc(db, 'teamMembers', memberUid);
-      const memberDoc = await getDoc(memberRef);
+      // Buscar pelo uid E teamId
+      const membersQuery = query(
+        collection(db, 'teamMembers'),
+        where('uid', '==', memberUid),
+        where('teamId', '==', teamId),
+        limit(1)
+      );
       
-      if (!memberDoc.exists() || memberDoc.data().teamId !== teamId) {
+      const snapshot = await getDocs(membersQuery);
+      
+      if (snapshot.empty) {
         throw new Error('Membro não encontrado na equipe');
       }
       
-      const updateData: any = { permissions };
+      const memberDoc = snapshot.docs[0];
+      const updateData: any = { 
+        permissions,
+        lastActiveAt: Timestamp.now()
+      };
       
       if (role) {
         updateData.role = role;
       }
       
-      await updateDoc(memberRef, updateData);
+      await updateDoc(doc(db, 'teamMembers', memberDoc.id), updateData);
       
       console.log('Permissões atualizadas com sucesso');
       return true;
@@ -291,14 +373,22 @@ class AdminService {
 
       console.log('Removendo membro:', memberUid);
       
-      const memberRef = doc(db, 'teamMembers', memberUid);
-      const memberDoc = await getDoc(memberRef);
+      // Buscar pelo uid E teamId
+      const membersQuery = query(
+        collection(db, 'teamMembers'),
+        where('uid', '==', memberUid),
+        where('teamId', '==', teamId),
+        limit(1)
+      );
       
-      if (!memberDoc.exists() || memberDoc.data().teamId !== teamId) {
+      const snapshot = await getDocs(membersQuery);
+      
+      if (snapshot.empty) {
         throw new Error('Membro não encontrado na equipe');
       }
       
-      await deleteDoc(memberRef);
+      const memberDoc = snapshot.docs[0];
+      await deleteDoc(doc(db, 'teamMembers', memberDoc.id));
       
       console.log('Membro removido com sucesso');
       return true;
@@ -309,10 +399,10 @@ class AdminService {
   }
 
   /**
-   * INVITATIONS
+   * INVITATIONS - CORRIGIDO: Sistema de convites seguros
    */
   
-  async createInvitation(teamId: string, email: string, role: TeamRole): Promise<TeamInvitation | null> {
+  async createInvitation(teamId: string, email: string, role: TeamRole): Promise<{ invitation: TeamInvitation; token: string } | null> {
     try {
       const isAuthenticated = await this.waitForAuth();
       if (!isAuthenticated) {
@@ -320,47 +410,75 @@ class AdminService {
       }
 
       const userId = this.getCurrentUserId();
-      console.log('Criando convite para:', email);
+      const normalizedEmail = email.toLowerCase().trim();
       
-      // Verificar se já existe convite pendente para este email
-      const existingQuery = query(
-        collection(db, 'invitations'),
-        where('teamId', '==', teamId),
-        where('email', '==', email.toLowerCase()),
-        where('status', '==', 'pending')
-      );
+      console.log('Criando convite para:', normalizedEmail);
       
-      const existingSnapshot = await getDocs(existingQuery);
-      
-      if (!existingSnapshot.empty) {
-        throw new Error('Já existe um convite pendente para este e-mail');
-      }
-      
-      const token = this.generateInviteToken();
-      const expiresAt = new Date();
-      expiresAt.setHours(expiresAt.getHours() + 72); // 72 horas
-      
-      const invitation = {
-        email: email.toLowerCase(),
-        teamId,
-        role,
-        token,
-        expiresAt: Timestamp.fromDate(expiresAt),
-        createdAt: Timestamp.now(),
-        createdBy: userId,
-        status: 'pending'
-      };
+      // Usar transação para garantir consistência
+      return await runTransaction(db, async (transaction) => {
+        // Verificar se já existe convite pendente
+        const existingQuery = query(
+          collection(db, 'invitations'),
+          where('teamId', '==', teamId),
+          where('email', '==', normalizedEmail),
+          where('status', 'in', ['pending'])
+        );
+        
+        const existingSnapshot = await getDocs(existingQuery);
+        
+        if (!existingSnapshot.empty) {
+          throw new Error('Já existe um convite pendente para este e-mail');
+        }
+        
+        // Verificar se usuário já é membro
+        const memberQuery = query(
+          collection(db, 'teamMembers'),
+          where('teamId', '==', teamId),
+          where('email', '==', normalizedEmail),
+          where('status', '==', 'active')
+        );
+        
+        const memberSnapshot = await getDocs(memberQuery);
+        
+        if (!memberSnapshot.empty) {
+          throw new Error('Este usuário já é membro da equipe');
+        }
+        
+        // Gerar token seguro
+        const { token, hash: tokenHash } = await this.generateSecureToken();
+        
+        const expiresAt = new Date();
+        expiresAt.setHours(expiresAt.getHours() + 72); // 72 horas
+        
+        const invitationData = {
+          email: normalizedEmail,
+          teamId,
+          role,
+          tokenHash,
+          expiresAt: Timestamp.fromDate(expiresAt),
+          createdAt: Timestamp.now(),
+          createdBy: userId,
+          status: 'pending' as const,
+          metadata: {
+            userAgent: navigator.userAgent,
+            acceptedFrom: 'web'
+          }
+        };
 
-      const inviteRef = await addDoc(collection(db, 'invitations'), invitation);
-      
-      console.log('Convite criado:', inviteRef.id);
-      
-      return {
-        id: inviteRef.id,
-        ...invitation,
-        expiresAt: expiresAt.toISOString(),
-        createdAt: new Date().toISOString()
-      } as TeamInvitation;
+        const inviteRef = doc(collection(db, 'invitations'));
+        transaction.set(inviteRef, invitationData);
+        
+        const invitation: TeamInvitation = {
+          id: inviteRef.id,
+          ...invitationData,
+          expiresAt: expiresAt.toISOString(),
+          createdAt: new Date().toISOString()
+        };
+        
+        console.log('Convite criado:', inviteRef.id);
+        
+        return { invitation, token };
+      });
     } catch (error) {
       console.error('Erro ao criar convite:', error);
       throw error;
@@ -400,6 +518,174 @@ class AdminService {
     }
   }
 
+  // CORRIGIDO: Validar convite sem autenticação
+  async validateInvitation(inviteId: string, token: string): Promise<InviteValidationResult> {
+    try {
+      console.log('Validando convite:', inviteId);
+      
+      const inviteDoc = await getDoc(doc(db, 'invitations', inviteId));
+      
+      if (!inviteDoc.exists()) {
+        return { valid: false, error: 'Convite não encontrado' };
+      }
+      
+      const invitation = {
+        id: inviteDoc.id,
+        ...inviteDoc.data(),
+        expiresAt: inviteDoc.data().expiresAt?.toDate?.()?.toISOString() || inviteDoc.data().expiresAt,
+        createdAt: inviteDoc.data().createdAt?.toDate?.()?.toISOString() || inviteDoc.data().createdAt,
+        usedAt: inviteDoc.data().usedAt?.toDate?.()?.toISOString() || inviteDoc.data().usedAt
+      } as TeamInvitation;
+      
+      // Verificar token hash
+      const providedTokenHash = await this.hashToken(token);
+      if (providedTokenHash !== invitation.tokenHash) {
+        console.log('Token hash mismatch:', { provided: providedTokenHash, expected: invitation.tokenHash });
+        return { valid: false, error: 'Token inválido' };
+      }
+      
+      // Verificar expiração
+      const now = new Date();
+      const expiresAt = new Date(invitation.expiresAt);
+      
+      if (now > expiresAt) {
+        // Marcar como expirado
+        await updateDoc(doc(db, 'invitations', inviteId), { 
+          status: 'expired' 
+        });
+        return { valid: false, error: 'Convite expirado' };
+      }
+      
+      // Verificar status
+      if (invitation.status !== 'pending') {
+        const statusMessages = {
+          accepted: 'Convite já foi aceito',
+          expired: 'Convite expirado',
+          cancelled: 'Convite cancelado',
+          revoked: 'Convite revogado'
+        };
+        return { 
+          valid: false, 
+          error: statusMessages[invitation.status] || 'Convite não está disponível'
+        };
+      }
+      
+      return { 
+        valid: true, 
+        invitation,
+        requiresAuth: !auth.currentUser
+      };
+      
+    } catch (error) {
+      console.error('Erro ao validar convite:', error);
+      return { valid: false, error: 'Erro interno ao validar convite' };
+    }
+  }
+
+  // CORRIGIDO: Aceitar convite com validação melhorada
+  async acceptInvitation(inviteId: string, token: string): Promise<InviteOperationResponse> {
+    try {
+      // Validar convite primeiro
+      const validation = await this.validateInvitation(inviteId, token);
+      
+      if (!validation.valid || !validation.invitation) {
+        return { success: false, message: validation.error || 'Convite inválido' };
+      }
+      
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        // Salvar no localStorage para processar após login
+        this.savePendingInvite({
+          inviteId,
+          token,
+          email: validation.invitation.email,
+          expiresAt: validation.invitation.expiresAt,
+          timestamp: new Date().toISOString()
+        });
+        
+        return { 
+          success: false, 
+          message: 'Faça login ou crie uma conta para aceitar o convite',
+          requiresAuth: true
+        };
+      }
+
+      const userId = this.getCurrentUserId();
+      const user = auth.currentUser;
+      
+      if (!user || !user.email) {
+        return { success: false, message: 'Usuário não possui email válido' };
+      }
+      
+      const invitation = validation.invitation;
+      
+      // Verificar se email bate (case-insensitive)
+      if (user.email.toLowerCase() !== invitation.email.toLowerCase()) {
+        return { 
+          success: false, 
+          message: 'Este convite foi enviado para outro e-mail. Faça login com o e-mail correto.' 
+        };
+      }
+      
+      // Usar transação para aceitar convite
+      return await runTransaction(db, async (transaction) => {
+        // Verificar se usuário já é membro
+        const memberQuery = query(
+          collection(db, 'teamMembers'),
+          where('uid', '==', userId),
+          where('teamId', '==', invitation.teamId),
+          limit(1)
+        );
+        
+        const memberSnapshot = await getDocs(memberQuery);
+        
+        if (!memberSnapshot.empty) {
+          return { success: false, message: 'Você já é membro desta equipe' };
+        }
+        
+        // Revalidar convite na transação
+        const inviteRef = doc(db, 'invitations', inviteId);
+        const currentInvite = await transaction.get(inviteRef);
+        
+        if (!currentInvite.exists() || currentInvite.data().status !== 'pending') {
+          return { success: false, message: 'Convite não está mais válido' };
+        }
+        
+        // Adicionar como membro
+        const memberRef = doc(collection(db, 'teamMembers'));
+        transaction.set(memberRef, {
+          uid: userId,
+          email: user.email,
+          teamId: invitation.teamId,
+          role: invitation.role,
+          permissions: DEFAULT_PERMISSIONS[invitation.role],
+          status: 'active',
+          addedAt: Timestamp.now(),
+          addedBy: invitation.createdBy,
+          lastActiveAt: Timestamp.now()
+        });
+        
+        // Marcar convite como aceito
+        transaction.update(inviteRef, {
+          status: 'accepted',
+          usedAt: Timestamp.now(),
+          acceptedBy: userId,
+          'metadata.acceptedFrom': 'web'
+        });
+        
+        return { 
+          success: true, 
+          message: 'Convite aceito com sucesso!',
+          data: { teamId: invitation.teamId }
+        };
+      });
+      
+    } catch (error) {
+      console.error('Erro ao aceitar convite:', error);
+      return { success: false, message: 'Erro interno. Tente novamente.' };
+    }
+  }
+
   async cancelInvitation(inviteId: string): Promise<boolean> {
     try {
       const isAuthenticated = await this.waitForAuth();
@@ -424,88 +710,28 @@ class AdminService {
     }
   }
 
-  async acceptInvitation(inviteId: string): Promise<{ success: boolean; message: string; teamId?: string }> {
+  // Novo: Revogar convite (diferente de cancelar)
+  async revokeInvitation(inviteId: string): Promise<boolean> {
     try {
       const isAuthenticated = await this.waitForAuth();
       if (!isAuthenticated) {
-        return { success: false, message: 'Usuário não autenticado' };
+        throw new Error('Usuário não autenticado');
       }
 
-      const userId = this.getCurrentUserId();
-      const user = auth.currentUser;
-      
-      if (!user || !user.email) {
-        return { success: false, message: 'Usuário não possui email válido' };
-      }
-      
-      console.log('Aceitando convite:', inviteId);
+      console.log('Revogando convite:', inviteId);
       
       const inviteRef = doc(db, 'invitations', inviteId);
-      const inviteDoc = await getDoc(inviteRef);
       
-      if (!inviteDoc.exists()) {
-        return { success: false, message: 'Convite não encontrado' };
-      }
-      
-      const invitation = inviteDoc.data() as TeamInvitation;
-      
-      // Verificar se convite não expirou
-      const now = new Date();
-      const expiresAt = invitation.expiresAt instanceof Timestamp 
-        ? invitation.expiresAt.toDate() 
-        : new Date(invitation.expiresAt);
-      
-      if (now > expiresAt) {
-        await updateDoc(inviteRef, { status: 'expired' });
-        return { success: false, message: 'Convite expirado' };
-      }
-      
-      // Verificar se convite já foi usado
-      if (invitation.status !== 'pending') {
-        return { success: false, message: 'Convite já foi utilizado ou cancelado' };
-      }
-      
-      // Verificar se usuário já é membro
-      const existingMemberDoc = await getDoc(doc(db, 'teamMembers', userId));
-      
-      if (existingMemberDoc.exists() && existingMemberDoc.data().teamId === invitation.teamId) {
-        return { success: false, message: 'Você já é membro desta equipe' };
-      }
-      
-      // Usar batch para operações atômicas
-      const batch = writeBatch(db);
-      
-      // Adicionar como membro usando o userId como ID do documento
-      const memberRef = doc(db, 'teamMembers', userId);
-      batch.set(memberRef, {
-        uid: userId,
-        email: user.email,
-        teamId: invitation.teamId,
-        role: invitation.role,
-        permissions: DEFAULT_PERMISSIONS[invitation.role],
-        status: 'active',
-        addedAt: Timestamp.now(),
-        addedBy: invitation.createdBy
+      await updateDoc(inviteRef, {
+        status: 'revoked',
+        revokedAt: Timestamp.now()
       });
       
-      // Marcar convite como aceito
-      batch.update(inviteRef, {
-        status: 'accepted',
-        usedAt: Timestamp.now()
-      });
-      
-      await batch.commit();
-      
-      console.log('Convite aceito com sucesso');
-      return { 
-        success: true, 
-        message: 'Convite aceito com sucesso!', 
-        teamId: invitation.teamId 
-      };
-      
+      console.log('Convite revogado com sucesso');
+      return true;
     } catch (error) {
-      console.error('Erro ao aceitar convite:', error);
-      return { success: false, message: 'Erro interno. Tente novamente.' };
+      console.error('Erro ao revogar convite:', error);
+      throw error;
     }
   }
 
@@ -533,7 +759,120 @@ class AdminService {
   }
 
   /**
-   * PERMISSIONS
+   * PENDING INVITES - Sistema melhorado para usuários não autenticados
+   */
+  
+  savePendingInvite(pendingInvite: PendingInvite): void {
+    try {
+      const existing = this.getPendingInvites();
+      const updated = existing.filter(invite => 
+        invite.inviteId !== pendingInvite.inviteId
+      );
+      updated.push(pendingInvite);
+      
+      // CORREÇÃO: Usar try-catch para localStorage
+      if (typeof Storage !== "undefined") {
+        localStorage.setItem('legalx_pending_invites', JSON.stringify(updated));
+        console.log('Convite pendente salvo:', pendingInvite.inviteId);
+      } else {
+        console.warn('localStorage não disponível');
+      }
+    } catch (error) {
+      console.error('Erro ao salvar convite pendente:', error);
+    }
+  }
+
+  getPendingInvites(): PendingInvite[] {
+    try {
+      if (typeof Storage === "undefined") {
+        return [];
+      }
+      
+      const stored = localStorage.getItem('legalx_pending_invites');
+      if (!stored) return [];
+      
+      const invites: PendingInvite[] = JSON.parse(stored);
+      const now = new Date();
+      
+      // Filtrar convites expirados
+      const valid = invites.filter(invite => {
+        const expiresAt = new Date(invite.expiresAt);
+        return now <= expiresAt;
+      });
+      
+      // Salvar lista limpa se houve mudanças
+      if (valid.length !== invites.length) {
+        localStorage.setItem('legalx_pending_invites', JSON.stringify(valid));
+      }
+      
+      return valid;
+    } catch (error) {
+      console.error('Erro ao recuperar convites pendentes:', error);
+      return [];
+    }
+  }
+
+  clearPendingInvite(inviteId: string): void {
+    try {
+      if (typeof Storage === "undefined") {
+        return;
+      }
+      
+      const existing = this.getPendingInvites();
+      const updated = existing.filter(invite => invite.inviteId !== inviteId);
+      localStorage.setItem('legalx_pending_invites', JSON.stringify(updated));
+      console.log('Convite pendente removido:', inviteId);
+    } catch (error) {
+      console.error('Erro ao limpar convite pendente:', error);
+    }
+  }
+
+  async processPendingInvites(): Promise<{ processed: number; errors: string[] }> {
+    try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        return { processed: 0, errors: ['Usuário não autenticado'] };
+      }
+
+      const pendingInvites = this.getPendingInvites();
+      
+      if (pendingInvites.length === 0) {
+        return { processed: 0, errors: [] };
+      }
+
+      console.log('Processando convites pendentes:', pendingInvites.length);
+      
+      let processed = 0;
+      const errors: string[] = [];
+      
+      for (const pendingInvite of pendingInvites) {
+        try {
+          const result = await this.acceptInvitation(pendingInvite.inviteId, pendingInvite.token);
+          
+          if (result.success) {
+            this.clearPendingInvite(pendingInvite.inviteId);
+            processed++;
+            console.log('Convite processado com sucesso:', pendingInvite.inviteId);
+          } else if (!result.requiresAuth) {
+            // Se não requer auth, é um erro definitivo
+            this.clearPendingInvite(pendingInvite.inviteId);
+            errors.push(`Convite ${pendingInvite.inviteId}: ${result.message}`);
+          }
+        } catch (error) {
+          console.error('Erro ao processar convite:', pendingInvite.inviteId, error);
+          errors.push(`Convite ${pendingInvite.inviteId}: Erro interno`);
+        }
+      }
+      
+      return { processed, errors };
+    } catch (error) {
+      console.error('Erro ao processar convites pendentes:', error);
+      return { processed: 0, errors: ['Erro interno ao processar convites'] };
+    }
+  }
+
+  /**
+   * PERMISSIONS - Atualizado para múltiplas memberships
    */
   
   async getUserPermissions(teamId: string): Promise<{ role: TeamRole; permissions: TeamPermissions } | null> {
@@ -545,13 +884,22 @@ class AdminService {
 
       const userId = this.getCurrentUserId();
       
-      const memberDoc = await getDoc(doc(db, 'teamMembers', userId));
+      // Buscar pelo uid E teamId
+      const memberQuery = query(
+        collection(db, 'teamMembers'),
+        where('uid', '==', userId),
+        where('teamId', '==', teamId),
+        where('status', '==', 'active'),
+        limit(1)
+      );
       
-      if (!memberDoc.exists() || memberDoc.data().teamId !== teamId || memberDoc.data().status !== 'active') {
+      const snapshot = await getDocs(memberQuery);
+      
+      if (snapshot.empty) {
         return null;
       }
       
-      const memberData = memberDoc.data();
+      const memberData = snapshot.docs[0].data();
       
       return {
         role: memberData.role,
@@ -563,19 +911,63 @@ class AdminService {
     }
   }
 
+  // Novo: Obter todas as equipes do usuário
+  async getUserTeams(): Promise<Team[]> {
+    try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      const userId = this.getCurrentUserId();
+      
+      // Buscar todas as memberships ativas
+      const memberQuery = query(
+        collection(db, 'teamMembers'),
+        where('uid', '==', userId),
+        where('status', '==', 'active')
+      );
+      
+      const memberSnapshot = await getDocs(memberQuery);
+      
+      if (memberSnapshot.empty) {
+        return [];
+      }
+      
+      // Buscar dados das equipes
+      const teamIds = memberSnapshot.docs.map(doc => doc.data().teamId);
+      const teams: Team[] = [];
+      
+      for (const teamId of teamIds) {
+        const teamDoc = await getDoc(doc(db, 'teams', teamId));
+        if (teamDoc.exists()) {
+          teams.push({
+            id: teamDoc.id,
+            ...teamDoc.data(),
+            createdAt: teamDoc.data().createdAt?.toDate?.()?.toISOString() || teamDoc.data().createdAt
+          } as Team);
+        }
+      }
+      
+      return teams;
+    } catch (error) {
+      console.error('Erro ao buscar equipes do usuário:', error);
+      throw error;
+    }
+  }
+
   /**
    * UTILITIES
    */
   
   private generateInviteToken(): string {
-    return Math.random().toString(36).substring(2, 15) + 
-           Math.random().toString(36).substring(2, 15) +
-           Date.now().toString(36);
+    return crypto.getRandomValues(new Uint8Array(32))
+      .reduce((acc, byte) => acc + byte.toString(16).padStart(2, '0'), '');
   }
 
-  generateInviteLink(inviteId: string): string {
+  generateInviteLink(inviteId: string, token: string): string {
     const baseUrl = window.location.origin;
-    return `${baseUrl}/aceitar?inviteId=${inviteId}`;
+    return `${baseUrl}/aceitar?inviteId=${inviteId}&token=${token}`;
   }
 
   generateMailtoLink(email: string, inviteLink: string, teamName: string): string {
@@ -590,6 +982,8 @@ ${inviteLink}
 
 Este convite expira em 72 horas.
 
+Se você ainda não possui uma conta, será direcionado para criar uma.
+
 Atenciosamente,
 Equipe LegalX
     `.trim());
@@ -597,8 +991,22 @@ Equipe LegalX
     return `mailto:${email}?subject=${subject}&body=${body}`;
   }
 
+  // Novo: Gerar link de WhatsApp
+  generateWhatsAppLink(phone: string, inviteLink: string, teamName: string): string {
+    const cleanPhone = phone.replace(/\D/g, '');
+    const message = encodeURIComponent(`
+Olá! Você foi convidado(a) para fazer parte da equipe "${teamName}" no LegalX.
+
+Clique no link para aceitar: ${inviteLink}
+
+O convite expira em 72 horas.
+    `.trim());
+    
+    return `https://wa.me/${cleanPhone}?text=${message}`;
+  }
+
   /**
-   * VALIDATION HELPERS
+   * VALIDATION HELPERS - Mantidos
    */
   
   validateCpfCnpj(value: string): boolean {
@@ -669,14 +1077,12 @@ Equipe LegalX
     const numbers = value.replace(/\D/g, '');
     
     if (numbers.length <= 11) {
-      // Formato CPF
       return numbers
         .replace(/(\d{3})(\d)/, '$1.$2')
         .replace(/(\d{3})(\d)/, '$1.$2')
         .replace(/(\d{3})(\d{1,2})/, '$1-$2')
         .replace(/(-\d{2})\d+?$/, '$1');
     } else {
-      // Formato CNPJ
       return numbers
         .replace(/(\d{2})(\d)/, '$1.$2')
         .replace(/(\d{3})(\d)/, '$1.$2')
@@ -690,13 +1096,11 @@ Equipe LegalX
     const numbers = value.replace(/\D/g, '');
     
     if (numbers.length <= 10) {
-      // Telefone fixo
       return numbers
         .replace(/(\d{2})(\d)/, '($1) $2')
         .replace(/(\d{4})(\d)/, '$1-$2')
         .replace(/(-\d{4})\d+?$/, '$1');
     } else {
-      // Celular
       return numbers
         .replace(/(\d{2})(\d)/, '($1) $2')
         .replace(/(\d{5})(\d)/, '$1-$2')

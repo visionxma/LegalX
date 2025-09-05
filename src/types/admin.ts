@@ -1,3 +1,5 @@
+// Tipos atualizados para suportar múltiplas memberships e convites seguros
+
 export interface Team {
   id: string;
   name: string;
@@ -19,7 +21,7 @@ export interface TeamPhone {
   id: string;
   type: 'Telefone comercial' | 'Celular comercial' | 'Fax' | 'Telefone pessoal' | 'WhatsApp' | 'Outro';
   number: string;
-  operator?: string; // Não usado para WhatsApp
+  operator?: string;
 }
 
 export interface TeamAddress {
@@ -36,29 +38,52 @@ export interface TeamSettings {
   allowInvitations: boolean;
   defaultRole: TeamRole;
   modules: string[];
+  maxMembers?: number;
+  requireEmailVerification?: boolean;
 }
 
+// MUDANÇA: Novo esquema para múltiplas memberships
 export interface TeamMember {
+  id: string; // Novo: ID único do documento
   uid: string;
   email: string;
+  teamId: string;
   role: TeamRole;
   permissions: TeamPermissions;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'suspended';
   addedAt: string;
   addedBy: string;
+  lastActiveAt?: string;
 }
 
+// MUDANÇA: Sistema de convites seguro com hash
 export interface TeamInvitation {
   id: string;
   email: string;
   teamId: string;
   role: TeamRole;
-  token: string;
+  tokenHash: string; // Novo: hash seguro do token
   expiresAt: string;
   createdAt: string;
   createdBy: string;
   usedAt?: string;
-  status: 'pending' | 'accepted' | 'expired' | 'cancelled';
+  acceptedBy?: string; // Novo: uid de quem aceitou
+  status: 'pending' | 'accepted' | 'expired' | 'cancelled' | 'revoked';
+  metadata?: {
+    userAgent?: string;
+    ipAddress?: string; // Se disponível
+    acceptedFrom?: 'web' | 'mobile';
+  };
+}
+
+// Novo: Interface para pending invites no localStorage
+export interface PendingInvite {
+  inviteId: string;
+  token: string;
+  email: string;
+  teamName?: string;
+  expiresAt: string;
+  timestamp: string;
 }
 
 export type TeamRole = 'owner' | 'admin' | 'editor' | 'viewer';
@@ -111,3 +136,19 @@ export const DEFAULT_PERMISSIONS: Record<TeamRole, TeamPermissions> = {
     configuracoes: false,
   },
 };
+
+// Novo: Utilitários para validação
+export interface InviteValidationResult {
+  valid: boolean;
+  invitation?: TeamInvitation;
+  error?: string;
+  requiresAuth?: boolean;
+}
+
+// Novo: Response para operações de convite
+export interface InviteOperationResponse {
+  success: boolean;
+  message: string;
+  data?: any;
+  requiresAuth?: boolean;
+}
