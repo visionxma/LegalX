@@ -246,15 +246,13 @@ class AdminService {
       const inviteRef = doc(collection(db, 'invitations'));
       await setDoc(inviteRef, invitationData);
       
-      // CORRIGIDO: Gerar link completo com URL correta
+      // CORRIGIDO: Gerar link completo com URL correta para GitHub Pages
       const baseUrl = window.location.origin;
-      const currentPath = window.location.pathname;
       
-      // Detectar se está no GitHub Pages ou ambiente local
       let correctBaseUrl;
       if (baseUrl.includes('github.io')) {
-        // GitHub Pages - usar URL completa com subpasta
-        correctBaseUrl = `${baseUrl}${currentPath.includes('/LegalX') ? '' : '/LegalX'}`;
+        // GitHub Pages - sempre incluir /LegalX
+        correctBaseUrl = `${baseUrl}/LegalX`;
       } else {
         // Desenvolvimento local ou outro ambiente
         correctBaseUrl = baseUrl;
