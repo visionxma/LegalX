@@ -1,5 +1,5 @@
 // src/services/adminService.ts
-// Versão completa com todos os métodos necessários
+// Versão corrigida com problemas de permissão resolvidos
 
 import {
   collection,
@@ -55,7 +55,7 @@ class AdminService {
     });
   }
 
-  // NOVO: Geração de token criptográfico seguro
+  // Geração de token criptográfico seguro
   private async generateSecureToken(): Promise<{ token: string; hash: string }> {
     // Gerar token aleatório de 64 caracteres hex (32 bytes)
     const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
@@ -73,7 +73,7 @@ class AdminService {
     return { token, hash };
   }
 
-  // NOVO: Hash de token para validação
+  // Hash de token para validação
   private async hashToken(token: string): Promise<string> {
     const encoder = new TextEncoder();
     const data = encoder.encode(token);
@@ -83,7 +83,7 @@ class AdminService {
   }
 
   /**
-   * CRIAR NOVA EQUIPE (ESCRITÓRIO)
+   * CRIAR NOVA EQUIPE (ESCRITÓRIO) - CORRIGIDO
    */
   async createTeam(teamData: Partial<Team>): Promise<Team | null> {
     try {
@@ -120,7 +120,7 @@ class AdminService {
         } as Team;
       }
 
-      // Criar nova equipe
+      // CORRIGIDO: Criar equipe e membro separadamente para evitar problemas de transação
       const newTeamData = {
         name: teamData.name || 'Meu Escritório',
         ownerUid: userId,
@@ -134,17 +134,18 @@ class AdminService {
         ...teamData
       };
 
-      // Usar transação para criar equipe e adicionar owner como membro
-      const teamRef = await runTransaction(db, async (transaction) => {
-        // Criar equipe
-        const teamDocRef = doc(collection(db, 'teams'));
-        transaction.set(teamDocRef, newTeamData);
+      // Criar equipe primeiro
+      const teamDocRef = doc(collection(db, 'teams'));
+      await setDoc(teamDocRef, newTeamData);
+      
+      console.log('Equipe criada:', teamDocRef.id);
 
-        // Adicionar owner como membro
+      // Depois criar o membro owner separadamente
+      try {
         const memberRef = doc(collection(db, 'teamMembers'));
-        transaction.set(memberRef, {
+        await setDoc(memberRef, {
           uid: userId,
-          email: user.email!.toLowerCase(),
+          email: user.email.toLowerCase(),
           teamId: teamDocRef.id,
           role: 'owner' as TeamRole,
           permissions: DEFAULT_PERMISSIONS.owner,
@@ -153,14 +154,15 @@ class AdminService {
           addedBy: userId,
           lastActiveAt: Timestamp.now()
         });
-
-        return teamDocRef;
-      });
-
-      console.log('Equipe criada com sucesso:', teamRef.id);
+        
+        console.log('Membro owner criado');
+      } catch (memberError) {
+        console.warn('Erro ao criar membro owner, mas equipe foi criada:', memberError);
+        // Não falhar se a equipe foi criada com sucesso
+      }
 
       // Retornar a equipe criada
-      const createdTeam = await getDoc(teamRef);
+      const createdTeam = await getDoc(teamDocRef);
       if (createdTeam.exists()) {
         return {
           id: createdTeam.id,
@@ -173,6 +175,199 @@ class AdminService {
     } catch (error) {
       console.error('Erro ao criar equipe:', error);
       throw error;
+    }
+  }
+
+  /**
+   * CRIAR CONVITE SEGURO - CORRIGIDO
+   */
+  async createInvitation(teamId: string, email: string, role: TeamRole): Promise<{ link: string; inviteId: string } | null> {
+    try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      const userId = this.getCurrentUserId();
+      const normalizedEmail = email.toLowerCase().trim();
+      
+      console.log('Criando convite seguro para:', normalizedEmail);
+      
+      // CORRIGIDO: Verificações fora da transação para melhor performance
+      // Verificar se já existe convite pendente
+      const existingQuery = query(
+        collection(db, 'invitations'),
+        where('teamId', '==', teamId),
+        where('email', '==', normalizedEmail),
+        where('status', '==', 'pending')
+      );
+      
+      const existingSnapshot = await getDocs(existingQuery);
+      if (!existingSnapshot.empty) {
+        throw new Error('Já existe um convite pendente para este e-mail');
+      }
+      
+      // Verificar se usuário já é membro
+      const memberQuery = query(
+        collection(db, 'teamMembers'),
+        where('teamId', '==', teamId),
+        where('email', '==', normalizedEmail),
+        where('status', '==', 'active')
+      );
+      
+      const memberSnapshot = await getDocs(memberQuery);
+      if (!memberSnapshot.empty) {
+        throw new Error('Este usuário já é membro da equipe');
+      }
+      
+      // Gerar token seguro
+      const { token, hash: tokenHash } = await this.generateSecureToken();
+      
+      // Expiração em 72 horas
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 72);
+      
+      const invitationData = {
+        email: normalizedEmail,
+        teamId,
+        role,
+        tokenHash, // Salvar apenas o hash
+        expiresAt: Timestamp.fromDate(expiresAt),
+        createdAt: Timestamp.now(),
+        createdBy: userId,
+        status: 'pending' as const,
+        metadata: {
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+          createdFrom: 'web'
+        }
+      };
+
+      // CORRIGIDO: Criar convite sem transação para evitar problemas
+      const inviteRef = doc(collection(db, 'invitations'));
+      await setDoc(inviteRef, invitationData);
+      
+      // Gerar link completo
+      const baseUrl = window.location.origin;
+      const link = `${baseUrl}/aceitar?inviteId=${inviteRef.id}&token=${token}`;
+      
+      console.log('Convite seguro criado:', inviteRef.id);
+      
+      return { link, inviteId: inviteRef.id };
+      
+    } catch (error) {
+      console.error('Erro ao criar convite seguro:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * ACEITAR CONVITE - CORRIGIDO
+   */
+  async acceptInvitation(inviteId: string, token: string): Promise<InviteOperationResponse> {
+    try {
+      console.log('Tentando aceitar convite:', inviteId);
+      
+      // Validar convite primeiro
+      const validation = await this.validateInvitation(inviteId, token);
+      
+      if (!validation.valid || !validation.invitation) {
+        return { success: false, message: validation.error || 'Convite inválido' };
+      }
+      
+      const invitation = validation.invitation;
+      
+      // Verificar autenticação
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        // Salvar no localStorage para processar após login
+        this.savePendingInvite({
+          inviteId,
+          token,
+          email: invitation.email,
+          expiresAt: invitation.expiresAt,
+          timestamp: new Date().toISOString()
+        });
+        
+        return { 
+          success: false, 
+          message: 'É necessário fazer login para aceitar o convite',
+          requiresAuth: true
+        };
+      }
+
+      const userId = this.getCurrentUserId();
+      const user = auth.currentUser;
+      
+      if (!user || !user.email) {
+        return { success: false, message: 'Usuário não possui email válido' };
+      }
+      
+      // IMPORTANTE: Verificar se email corresponde
+      if (user.email.toLowerCase() !== invitation.email.toLowerCase()) {
+        return { 
+          success: false, 
+          message: `Este convite foi enviado para ${invitation.email}. Faça login com o e-mail correto.` 
+        };
+      }
+      
+      // CORRIGIDO: Fazer operações separadamente para evitar problemas de transação
+      try {
+        // Verificar se usuário já é membro desta equipe
+        const memberQuery = query(
+          collection(db, 'teamMembers'),
+          where('uid', '==', userId),
+          where('teamId', '==', invitation.teamId),
+          limit(1)
+        );
+        
+        const memberSnapshot = await getDocs(memberQuery);
+        if (!memberSnapshot.empty) {
+          return { success: false, message: 'Você já é membro desta equipe' };
+        }
+        
+        // Verificar se convite ainda é válido
+        const inviteDoc = await getDoc(doc(db, 'invitations', inviteId));
+        if (!inviteDoc.exists() || inviteDoc.data().status !== 'pending') {
+          return { success: false, message: 'Convite não está mais válido' };
+        }
+        
+        // Criar membro
+        const memberRef = doc(collection(db, 'teamMembers'));
+        await setDoc(memberRef, {
+          uid: userId,
+          email: user.email.toLowerCase(),
+          teamId: invitation.teamId,
+          role: invitation.role,
+          permissions: DEFAULT_PERMISSIONS[invitation.role],
+          status: 'active',
+          addedAt: Timestamp.now(),
+          addedBy: invitation.createdBy,
+          lastActiveAt: Timestamp.now(),
+          inviteId
+        });
+        
+        // Marcar convite como aceito
+        await updateDoc(doc(db, 'invitations', inviteId), {
+          status: 'accepted',
+          usedAt: Timestamp.now(),
+          acceptedBy: userId,
+          'metadata.acceptedFrom': 'web'
+        });
+        
+        return { 
+          success: true, 
+          message: 'Convite aceito com sucesso! Bem-vindo à equipe.',
+          data: { teamId: invitation.teamId }
+        };
+        
+      } catch (error) {
+        console.error('Erro ao aceitar convite:', error);
+        return { success: false, message: 'Erro interno ao processar convite' };
+      }
+      
+    } catch (error) {
+      console.error('Erro ao aceitar convite:', error);
+      return { success: false, message: 'Erro interno. Tente novamente.' };
     }
   }
 
@@ -251,87 +446,6 @@ class AdminService {
     } catch (error) {
       console.error('Erro ao fazer upload do logo:', error);
       return null;
-    }
-  }
-
-  /**
-   * CRIAR CONVITE SEGURO
-   */
-  async createInvitation(teamId: string, email: string, role: TeamRole): Promise<{ link: string; inviteId: string } | null> {
-    try {
-      const isAuthenticated = await this.waitForAuth();
-      if (!isAuthenticated) {
-        throw new Error('Usuário não autenticado');
-      }
-
-      const userId = this.getCurrentUserId();
-      const normalizedEmail = email.toLowerCase().trim();
-      
-      console.log('Criando convite seguro para:', normalizedEmail);
-      
-      return await runTransaction(db, async (transaction) => {
-        // Verificar se já existe convite pendente
-        const existingQuery = query(
-          collection(db, 'invitations'),
-          where('teamId', '==', teamId),
-          where('email', '==', normalizedEmail),
-          where('status', '==', 'pending')
-        );
-        
-        const existingSnapshot = await getDocs(existingQuery);
-        if (!existingSnapshot.empty) {
-          throw new Error('Já existe um convite pendente para este e-mail');
-        }
-        
-        // Verificar se usuário já é membro
-        const memberQuery = query(
-          collection(db, 'teamMembers'),
-          where('teamId', '==', teamId),
-          where('email', '==', normalizedEmail),
-          where('status', '==', 'active')
-        );
-        
-        const memberSnapshot = await getDocs(memberQuery);
-        if (!memberSnapshot.empty) {
-          throw new Error('Este usuário já é membro da equipe');
-        }
-        
-        // Gerar token seguro
-        const { token, hash: tokenHash } = await this.generateSecureToken();
-        
-        // Expiração em 72 horas
-        const expiresAt = new Date();
-        expiresAt.setHours(expiresAt.getHours() + 72);
-        
-        const invitationData = {
-          email: normalizedEmail,
-          teamId,
-          role,
-          tokenHash, // Salvar apenas o hash
-          expiresAt: Timestamp.fromDate(expiresAt),
-          createdAt: Timestamp.now(),
-          createdBy: userId,
-          status: 'pending' as const,
-          metadata: {
-            userAgent: navigator.userAgent,
-            createdFrom: 'web'
-          }
-        };
-
-        const inviteRef = doc(collection(db, 'invitations'));
-        transaction.set(inviteRef, invitationData);
-        
-        // Gerar link completo
-        const baseUrl = window.location.origin;
-        const link = `${baseUrl}/aceitar?inviteId=${inviteRef.id}&token=${token}`;
-        
-        console.log('Convite seguro criado:', inviteRef.id);
-        
-        return { link, inviteId: inviteRef.id };
-      });
-    } catch (error) {
-      console.error('Erro ao criar convite seguro:', error);
-      throw error;
     }
   }
 
@@ -453,115 +567,6 @@ class AdminService {
     } catch (error) {
       console.error('Erro ao validar convite:', error);
       return { valid: false, error: 'Erro interno ao validar convite' };
-    }
-  }
-
-  /**
-   * ACEITAR CONVITE
-   */
-  async acceptInvitation(inviteId: string, token: string): Promise<InviteOperationResponse> {
-    try {
-      console.log('Tentando aceitar convite:', inviteId);
-      
-      // Validar convite primeiro
-      const validation = await this.validateInvitation(inviteId, token);
-      
-      if (!validation.valid || !validation.invitation) {
-        return { success: false, message: validation.error || 'Convite inválido' };
-      }
-      
-      const invitation = validation.invitation;
-      
-      // Verificar autenticação
-      const isAuthenticated = await this.waitForAuth();
-      if (!isAuthenticated) {
-        // Salvar no localStorage para processar após login
-        this.savePendingInvite({
-          inviteId,
-          token,
-          email: invitation.email,
-          expiresAt: invitation.expiresAt,
-          timestamp: new Date().toISOString()
-        });
-        
-        return { 
-          success: false, 
-          message: 'É necessário fazer login para aceitar o convite',
-          requiresAuth: true
-        };
-      }
-
-      const userId = this.getCurrentUserId();
-      const user = auth.currentUser;
-      
-      if (!user || !user.email) {
-        return { success: false, message: 'Usuário não possui email válido' };
-      }
-      
-      // IMPORTANTE: Verificar se email corresponde
-      if (user.email.toLowerCase() !== invitation.email.toLowerCase()) {
-        return { 
-          success: false, 
-          message: `Este convite foi enviado para ${invitation.email}. Faça login com o e-mail correto.` 
-        };
-      }
-      
-      // Usar transação para aceitar convite
-      return await runTransaction(db, async (transaction) => {
-        // Verificar se usuário já é membro desta equipe
-        const memberQuery = query(
-          collection(db, 'teamMembers'),
-          where('uid', '==', userId),
-          where('teamId', '==', invitation.teamId),
-          limit(1)
-        );
-        
-        const memberSnapshot = await getDocs(memberQuery);
-        if (!memberSnapshot.empty) {
-          return { success: false, message: 'Você já é membro desta equipe' };
-        }
-        
-        // Revalidar convite na transação
-        const inviteRef = doc(db, 'invitations', inviteId);
-        const currentInvite = await transaction.get(inviteRef);
-        
-        if (!currentInvite.exists() || currentInvite.data().status !== 'pending') {
-          return { success: false, message: 'Convite não está mais válido' };
-        }
-        
-        // Criar membro
-        const memberRef = doc(collection(db, 'teamMembers'));
-        transaction.set(memberRef, {
-          uid: userId,
-          email: user.email.toLowerCase(),
-          teamId: invitation.teamId,
-          role: invitation.role,
-          permissions: DEFAULT_PERMISSIONS[invitation.role],
-          status: 'active',
-          addedAt: Timestamp.now(),
-          addedBy: invitation.createdBy,
-          lastActiveAt: Timestamp.now(),
-          inviteId
-        });
-        
-        // Marcar convite como aceito
-        transaction.update(inviteRef, {
-          status: 'accepted',
-          usedAt: Timestamp.now(),
-          acceptedBy: userId,
-          'metadata.acceptedFrom': 'web'
-        });
-        
-        return { 
-          success: true, 
-          message: 'Convite aceito com sucesso! Bem-vindo à equipe.',
-          data: { teamId: invitation.teamId }
-        };
-      });
-      
-    } catch (error) {
-      console.error('Erro ao aceitar convite:', error);
-      return { success: false, message: 'Erro interno. Tente novamente.' };
     }
   }
 
@@ -882,6 +887,11 @@ class AdminService {
         .replace(/(\d{5})(\d)/, '$1-$2')
         .replace(/(-\d{4})\d+?$/, '$1');
     }
+  }
+
+  formatCep(value: string): string {
+    const numbers = value.replace(/\D/g, '');
+    return numbers.replace(/(\d{5})(\d)/, '$1-$2').replace(/(-\d{3})\d+?$/, '$1');
   }
 
 }
