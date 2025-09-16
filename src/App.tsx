@@ -36,13 +36,6 @@ function App() {
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list")
   const [quickActionType, setQuickActionType] = useState<string | null>(null)
 
-  // Verificar se estamos na rota de aceitar convite
-  const isInviteRoute = location.pathname === '/aceitar'
-
-  // Se estiver na rota de convite, renderizar apenas a página de aceite
-  if (isInviteRoute) {
-    return <InviteAcceptPage />
-  }
   const handleLogout = async () => {
     try {
       await authService.logout()
@@ -72,6 +65,7 @@ function App() {
     setShowAdmin(false)
     setActiveSection("dashboard")
   }
+  
   const handleQuickAction = (action: string) => {
     setShowAdmin(false)
     switch (action) {
@@ -294,7 +288,10 @@ function App() {
 
   return (
     <Routes>
+      {/* ROTA PÚBLICA PARA ACEITAR CONVITES - DEVE FICAR PRIMEIRO */}
       <Route path="/aceitar" element={<InviteAcceptPage />} />
+      
+      {/* ROTAS PROTEGIDAS POR AUTENTICAÇÃO */}
       <Route path="/*" element={<AuthWrapper>{renderApp}</AuthWrapper>} />
     </Routes>
   )
