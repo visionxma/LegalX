@@ -1,10 +1,5 @@
-// DIFF: src/services/adminService.ts
-// Principais mudanças:
-// - generateSecureToken() com crypto API nativa
-// - createInvitation() retorna link direto
-// - acceptInvitation() com validação de hash e email
-// - Suporte a múltiplas memberships
-// - Sistema de pending invites melhorado
+// src/services/adminService.ts
+// Versão completa com todos os métodos necessários
 
 import {
   collection,
@@ -88,7 +83,179 @@ class AdminService {
   }
 
   /**
-   * ATUALIZADO: createInvitation - Gera link seguro
+   * CRIAR NOVA EQUIPE (ESCRITÓRIO)
+   */
+  async createTeam(teamData: Partial<Team>): Promise<Team | null> {
+    try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      const userId = this.getCurrentUserId();
+      const user = auth.currentUser;
+      
+      if (!user?.email) {
+        throw new Error('Usuário sem email válido');
+      }
+
+      console.log('Criando nova equipe para usuário:', userId);
+
+      // Verificar se usuário já tem uma equipe
+      const existingTeamQuery = query(
+        collection(db, 'teams'),
+        where('ownerUid', '==', userId),
+        limit(1)
+      );
+      
+      const existingSnapshot = await getDocs(existingTeamQuery);
+      
+      if (!existingSnapshot.empty) {
+        console.log('Usuário já possui uma equipe');
+        const existingTeam = existingSnapshot.docs[0];
+        return {
+          id: existingTeam.id,
+          ...existingTeam.data(),
+          createdAt: existingTeam.data().createdAt?.toDate?.()?.toISOString() || existingTeam.data().createdAt
+        } as Team;
+      }
+
+      // Criar nova equipe
+      const newTeamData = {
+        name: teamData.name || 'Meu Escritório',
+        ownerUid: userId,
+        createdAt: Timestamp.now(),
+        phones: teamData.phones || [],
+        settings: teamData.settings || {
+          allowInvitations: true,
+          defaultRole: 'viewer' as TeamRole,
+          modules: ['processos', 'agenda', 'documentos', 'relatorios']
+        },
+        ...teamData
+      };
+
+      // Usar transação para criar equipe e adicionar owner como membro
+      const teamRef = await runTransaction(db, async (transaction) => {
+        // Criar equipe
+        const teamDocRef = doc(collection(db, 'teams'));
+        transaction.set(teamDocRef, newTeamData);
+
+        // Adicionar owner como membro
+        const memberRef = doc(collection(db, 'teamMembers'));
+        transaction.set(memberRef, {
+          uid: userId,
+          email: user.email!.toLowerCase(),
+          teamId: teamDocRef.id,
+          role: 'owner' as TeamRole,
+          permissions: DEFAULT_PERMISSIONS.owner,
+          status: 'active',
+          addedAt: Timestamp.now(),
+          addedBy: userId,
+          lastActiveAt: Timestamp.now()
+        });
+
+        return teamDocRef;
+      });
+
+      console.log('Equipe criada com sucesso:', teamRef.id);
+
+      // Retornar a equipe criada
+      const createdTeam = await getDoc(teamRef);
+      if (createdTeam.exists()) {
+        return {
+          id: createdTeam.id,
+          ...createdTeam.data(),
+          createdAt: createdTeam.data().createdAt?.toDate?.()?.toISOString() || createdTeam.data().createdAt
+        } as Team;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Erro ao criar equipe:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * ATUALIZAR EQUIPE
+   */
+  async updateTeam(teamId: string, updates: Partial<Team>): Promise<Team | null> {
+    try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      const userId = this.getCurrentUserId();
+      console.log('Atualizando equipe:', teamId);
+
+      // Verificar se usuário é owner
+      const teamDoc = await getDoc(doc(db, 'teams', teamId));
+      
+      if (!teamDoc.exists()) {
+        throw new Error('Equipe não encontrada');
+      }
+
+      if (teamDoc.data().ownerUid !== userId) {
+        throw new Error('Apenas o proprietário pode atualizar a equipe');
+      }
+
+      // Remover campos que não devem ser atualizados
+      const { id, ownerUid, createdAt, ...updateData } = updates;
+
+      // Atualizar equipe
+      await updateDoc(doc(db, 'teams', teamId), {
+        ...updateData,
+        updatedAt: Timestamp.now()
+      });
+
+      // Retornar equipe atualizada
+      const updatedTeam = await getDoc(doc(db, 'teams', teamId));
+      
+      if (updatedTeam.exists()) {
+        return {
+          id: updatedTeam.id,
+          ...updatedTeam.data(),
+          createdAt: updatedTeam.data().createdAt?.toDate?.()?.toISOString() || updatedTeam.data().createdAt
+        } as Team;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Erro ao atualizar equipe:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * UPLOAD DE LOGO (Base64)
+   */
+  async uploadLogo(file: File, teamId: string): Promise<string | null> {
+    try {
+      // Converter arquivo para base64
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        
+        reader.onload = () => {
+          const base64String = reader.result as string;
+          resolve(base64String);
+        };
+        
+        reader.onerror = (error) => {
+          console.error('Erro ao converter arquivo:', error);
+          reject(null);
+        };
+        
+        reader.readAsDataURL(file);
+      });
+    } catch (error) {
+      console.error('Erro ao fazer upload do logo:', error);
+      return null;
+    }
+  }
+
+  /**
+   * CRIAR CONVITE SEGURO
    */
   async createInvitation(teamId: string, email: string, role: TeamRole): Promise<{ link: string; inviteId: string } | null> {
     try {
@@ -169,7 +336,61 @@ class AdminService {
   }
 
   /**
-   * NOVO: validateInvitation - Validação sem auth obrigatória
+   * OBTER CONVITES DA EQUIPE
+   */
+  async getTeamInvitations(teamId: string): Promise<TeamInvitation[]> {
+    try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      const invitationsQuery = query(
+        collection(db, 'invitations'),
+        where('teamId', '==', teamId),
+        orderBy('createdAt', 'desc')
+      );
+      
+      const snapshot = await getDocs(invitationsQuery);
+      
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        expiresAt: doc.data().expiresAt?.toDate?.()?.toISOString() || doc.data().expiresAt,
+        createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || doc.data().createdAt,
+        usedAt: doc.data().usedAt?.toDate?.()?.toISOString() || doc.data().usedAt
+      })) as TeamInvitation[];
+    } catch (error) {
+      console.error('Erro ao buscar convites:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * CANCELAR CONVITE
+   */
+  async cancelInvitation(inviteId: string): Promise<boolean> {
+    try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      await updateDoc(doc(db, 'invitations', inviteId), {
+        status: 'cancelled',
+        cancelledAt: Timestamp.now(),
+        cancelledBy: this.getCurrentUserId()
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Erro ao cancelar convite:', error);
+      return false;
+    }
+  }
+
+  /**
+   * VALIDAR CONVITE
    */
   async validateInvitation(inviteId: string, token: string): Promise<InviteValidationResult> {
     try {
@@ -236,7 +457,7 @@ class AdminService {
   }
 
   /**
-   * ATUALIZADO: acceptInvitation - Com validação de email e múltiplas memberships
+   * ACEITAR CONVITE
    */
   async acceptInvitation(inviteId: string, token: string): Promise<InviteOperationResponse> {
     try {
@@ -308,7 +529,7 @@ class AdminService {
           return { success: false, message: 'Convite não está mais válido' };
         }
         
-        // NOVO: Criar membro com suporte a múltiplas memberships
+        // Criar membro
         const memberRef = doc(collection(db, 'teamMembers'));
         transaction.set(memberRef, {
           uid: userId,
@@ -320,7 +541,7 @@ class AdminService {
           addedAt: Timestamp.now(),
           addedBy: invitation.createdBy,
           lastActiveAt: Timestamp.now(),
-          inviteId // Referência ao convite que originou a membership
+          inviteId
         });
         
         // Marcar convite como aceito
@@ -345,7 +566,7 @@ class AdminService {
   }
 
   /**
-   * ATUALIZADO: getTeam - Com suporte a múltiplas memberships
+   * OBTER EQUIPE
    */
   async getTeam(): Promise<Team | null> {
     try {
@@ -404,7 +625,7 @@ class AdminService {
   }
 
   /**
-   * ATUALIZADO: getTeamMembers - Com múltiplas memberships
+   * OBTER MEMBROS DA EQUIPE
    */
   async getTeamMembers(teamId: string): Promise<TeamMember[]> {
     try {
@@ -434,7 +655,89 @@ class AdminService {
   }
 
   /**
-   * PENDING INVITES - Sistema localStorage melhorado
+   * ATUALIZAR PERMISSÕES DE MEMBRO
+   */
+  async updateMemberPermissions(
+    teamId: string, 
+    memberUid: string, 
+    permissions: TeamPermissions, 
+    role: TeamRole
+  ): Promise<boolean> {
+    try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      // Buscar o documento do membro
+      const memberQuery = query(
+        collection(db, 'teamMembers'),
+        where('teamId', '==', teamId),
+        where('uid', '==', memberUid),
+        limit(1)
+      );
+      
+      const memberSnapshot = await getDocs(memberQuery);
+      
+      if (memberSnapshot.empty) {
+        throw new Error('Membro não encontrado');
+      }
+
+      const memberDoc = memberSnapshot.docs[0];
+      
+      // Atualizar permissões
+      await updateDoc(doc(db, 'teamMembers', memberDoc.id), {
+        permissions,
+        role,
+        updatedAt: Timestamp.now(),
+        updatedBy: this.getCurrentUserId()
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Erro ao atualizar permissões:', error);
+      return false;
+    }
+  }
+
+  /**
+   * REMOVER MEMBRO DA EQUIPE
+   */
+  async removeMember(teamId: string, memberUid: string): Promise<boolean> {
+    try {
+      const isAuthenticated = await this.waitForAuth();
+      if (!isAuthenticated) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      // Buscar o documento do membro
+      const memberQuery = query(
+        collection(db, 'teamMembers'),
+        where('teamId', '==', teamId),
+        where('uid', '==', memberUid),
+        limit(1)
+      );
+      
+      const memberSnapshot = await getDocs(memberQuery);
+      
+      if (memberSnapshot.empty) {
+        throw new Error('Membro não encontrado');
+      }
+
+      const memberDoc = memberSnapshot.docs[0];
+      
+      // Deletar membro
+      await deleteDoc(doc(db, 'teamMembers', memberDoc.id));
+
+      return true;
+    } catch (error) {
+      console.error('Erro ao remover membro:', error);
+      return false;
+    }
+  }
+
+  /**
+   * SISTEMA DE PENDING INVITES (localStorage)
    */
   
   savePendingInvite(pendingInvite: PendingInvite): void {
@@ -538,8 +841,49 @@ class AdminService {
     }
   }
 
-  // Métodos adicionais mantidos...
-  // [resto dos métodos do adminService original]
+  /**
+   * UTILITÁRIOS DE FORMATAÇÃO
+   */
+  
+  formatCpfCnpj(value: string): string {
+    const numbers = value.replace(/\D/g, '');
+    
+    if (numbers.length <= 11) {
+      // CPF
+      return numbers
+        .replace(/(\d{3})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d{1,2})/, '$1-$2')
+        .replace(/(-\d{2})\d+?$/, '$1');
+    } else {
+      // CNPJ
+      return numbers
+        .replace(/(\d{2})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d)/, '$1/$2')
+        .replace(/(\d{4})(\d)/, '$1-$2')
+        .replace(/(-\d{2})\d+?$/, '$1');
+    }
+  }
+
+  formatPhone(value: string): string {
+    const numbers = value.replace(/\D/g, '');
+    
+    if (numbers.length <= 10) {
+      // Telefone fixo
+      return numbers
+        .replace(/(\d{2})(\d)/, '($1) $2')
+        .replace(/(\d{4})(\d)/, '$1-$2')
+        .replace(/(-\d{4})\d+?$/, '$1');
+    } else {
+      // Celular
+      return numbers
+        .replace(/(\d{2})(\d)/, '($1) $2')
+        .replace(/(\d{5})(\d)/, '$1-$2')
+        .replace(/(-\d{4})\d+?$/, '$1');
+    }
+  }
+
 }
 
 export const adminService = new AdminService();
