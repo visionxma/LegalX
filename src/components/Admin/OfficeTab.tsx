@@ -23,7 +23,16 @@ interface OfficeTabProps {
 
 export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
   const [phones, setPhones] = useState<TeamPhone[]>([]);
-  const [address, setAddress] = useState<TeamAddress | undefined>(undefined);
+  // CORRIGIDO: Inicializar address com valores padrão
+  const [address, setAddress] = useState<TeamAddress>({
+    type: 'Comercial',
+    cep: '',
+    street: '',
+    city: '',
+    state: '',
+    country: 'Brasil',
+    complement: ''
+  });
   const [logoPreview, setLogoPreview] = useState<string>('');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -68,7 +77,20 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
       });
 
       setPhones(team.phones || []);
-      setAddress(team.address);
+      
+      // CORRIGIDO: Inicializar address corretamente
+      if (team.address) {
+        setAddress({
+          type: team.address.type || 'Comercial',
+          cep: team.address.cep || '',
+          street: team.address.street || '',
+          city: team.address.city || '',
+          state: team.address.state || '',
+          country: team.address.country || 'Brasil',
+          complement: team.address.complement || ''
+        });
+      }
+      
       setLogoPreview(team.logoUrl || '');
     }
   }, [team, reset]);
@@ -188,18 +210,12 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
     }
   };
 
+  // CORRIGIDO: Função updateAddress simplificada
   const updateAddress = (field: keyof TeamAddress, value: string) => {
     setAddress(prev => ({
       ...prev,
-      [field]: value,
-      // Garantir que sempre tenha os campos obrigatórios
-      type: prev?.type || 'Comercial',
-      cep: prev?.cep || '',
-      street: prev?.street || '',
-      city: prev?.city || '',
-      state: prev?.state || '',
-      country: prev?.country || 'Brasil'
-    } as TeamAddress));
+      [field]: value
+    }));
   };
 
   return (
@@ -440,7 +456,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
           </div>
         </div>
 
-        {/* Address Section */}
+        {/* Address Section - CORRIGIDO */}
         <div>
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Endereço</h3>
           
@@ -450,7 +466,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                 Tipo de Endereço
               </label>
               <select
-                value={address?.type || 'Comercial'}
+                value={address.type}
                 onChange={(e) => updateAddress('type', e.target.value)}
                 disabled={loading}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
@@ -467,7 +483,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                 </label>
                 <input
                   type="text"
-                  value={address?.cep || ''}
+                  value={address.cep}
                   onChange={(e) => updateAddress('cep', adminService.formatCep(e.target.value))}
                   disabled={loading}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
@@ -481,7 +497,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                 </label>
                 <input
                   type="text"
-                  value={address?.street || ''}
+                  value={address.street}
                   onChange={(e) => updateAddress('street', e.target.value)}
                   disabled={loading}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
@@ -495,7 +511,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                 </label>
                 <input
                   type="text"
-                  value={address?.complement || ''}
+                  value={address.complement || ''}
                   onChange={(e) => updateAddress('complement', e.target.value)}
                   disabled={loading}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
@@ -509,7 +525,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                 </label>
                 <input
                   type="text"
-                  value={address?.city || ''}
+                  value={address.city}
                   onChange={(e) => updateAddress('city', e.target.value)}
                   disabled={loading}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
@@ -522,7 +538,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                   Estado
                 </label>
                 <select
-                  value={address?.state || ''}
+                  value={address.state}
                   onChange={(e) => updateAddress('state', e.target.value)}
                   disabled={loading}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
@@ -564,7 +580,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                 </label>
                 <input
                   type="text"
-                  value={address?.country || 'Brasil'}
+                  value={address.country}
                   onChange={(e) => updateAddress('country', e.target.value)}
                   disabled={loading}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
