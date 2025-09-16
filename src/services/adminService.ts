@@ -178,8 +178,8 @@ class AdminService {
     }
   }
 
-  /**
-   * CRIAR CONVITE SEGURO - CORRIGIDO
+/**
+   * CRIAR CONVITE SEGURO - CORRIGIDO (URL e validação de dados)
    */
   async createInvitation(teamId: string, email: string, role: TeamRole): Promise<{ link: string; inviteId: string } | null> {
     try {
@@ -193,7 +193,7 @@ class AdminService {
       
       console.log('Criando convite seguro para:', normalizedEmail);
       
-      // CORRIGIDO: Verificações fora da transação para melhor performance
+      // Verificações fora da transação para melhor performance
       // Verificar se já existe convite pendente
       const existingQuery = query(
         collection(db, 'invitations'),
@@ -242,15 +242,28 @@ class AdminService {
         }
       };
 
-      // CORRIGIDO: Criar convite sem transação para evitar problemas
+      // Criar convite sem transação para evitar problemas
       const inviteRef = doc(collection(db, 'invitations'));
       await setDoc(inviteRef, invitationData);
       
-      // Gerar link completo
+      // CORRIGIDO: Gerar link completo com URL correta
       const baseUrl = window.location.origin;
-      const link = `${baseUrl}/aceitar?inviteId=${inviteRef.id}&token=${token}`;
+      const currentPath = window.location.pathname;
+      
+      // Detectar se está no GitHub Pages ou ambiente local
+      let correctBaseUrl;
+      if (baseUrl.includes('github.io')) {
+        // GitHub Pages - usar URL completa com subpasta
+        correctBaseUrl = `${baseUrl}${currentPath.includes('/LegalX') ? '' : '/LegalX'}`;
+      } else {
+        // Desenvolvimento local ou outro ambiente
+        correctBaseUrl = baseUrl;
+      }
+      
+      const link = `${correctBaseUrl}/#/aceitar?inviteId=${inviteRef.id}&token=${token}`;
       
       console.log('Convite seguro criado:', inviteRef.id);
+      console.log('Link gerado:', link);
       
       return { link, inviteId: inviteRef.id };
       
