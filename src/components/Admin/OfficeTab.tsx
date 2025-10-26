@@ -1,9 +1,11 @@
+// src/components/Admin/OfficeTab.tsx
 import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import { Team, TeamPhone, TeamAddress } from '../../types/admin';
 import { adminService } from '../../services/adminService';
+import { useTeam } from '../../contexts/TeamContext';
 import { PlusIcon, XMarkIcon, PhotoIcon, BuildingOfficeIcon } from '@heroicons/react/24/outline';
 
 const schema = yup.object({
@@ -23,7 +25,6 @@ interface OfficeTabProps {
 
 export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
   const [phones, setPhones] = useState<TeamPhone[]>([]);
-  // CORRIGIDO: Inicializar address com valores padrão
   const [address, setAddress] = useState<TeamAddress>({
     type: 'Comercial',
     cep: '',
@@ -37,6 +38,10 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // NOVO: Verificar permissões
+  const { isOwner, isSoloMode } = useTeam();
+  const canEdit = isSoloMode || isOwner;
 
   const {
     register,
@@ -60,12 +65,10 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
 
   const watchedCpfCnpj = watch('cpfCnpj');
 
-  // Inicializar formulário com dados da equipe
   useEffect(() => {
     if (team) {
       console.log('Inicializando formulário com dados da equipe:', team);
       
-      // Resetar form com os dados da equipe
       reset({
         name: team.name || '',
         cpfCnpj: team.cpfCnpj || '',
@@ -78,7 +81,6 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
 
       setPhones(team.phones || []);
       
-      // CORRIGIDO: Inicializar address corretamente
       if (team.address) {
         setAddress({
           type: team.address.type || 'Comercial',
@@ -95,7 +97,6 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
     }
   }, [team, reset]);
 
-  // Formatar CPF/CNPJ em tempo real
   useEffect(() => {
     if (watchedCpfCnpj) {
       const formatted = adminService.formatCpfCnpj(watchedCpfCnpj);
@@ -106,6 +107,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
   }, [watchedCpfCnpj, setValue]);
 
   const addPhone = () => {
+    if (!canEdit) return;
+    
     const newPhone: TeamPhone = {
       id: Date.now().toString(),
       type: 'Telefone comercial',
@@ -116,12 +119,13 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
   };
 
   const updatePhone = (id: string, field: keyof TeamPhone, value: string) => {
+    if (!canEdit) return;
+    
     setPhones(phones.map(phone => 
       phone.id === id 
         ? { 
             ...phone, 
             [field]: value,
-            // Limpar operadora se for WhatsApp
             ...(field === 'type' && value === 'WhatsApp' ? { operator: '' } : {})
           }
         : phone
@@ -129,19 +133,20 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
   };
 
   const removePhone = (id: string) => {
+    if (!canEdit) return;
     setPhones(phones.filter(phone => phone.id !== id));
   };
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
+    
     const file = e.target.files?.[0];
     if (file) {
-      // Validar tamanho do arquivo (máximo 500KB para base64)
       if (file.size > 500 * 1024) {
         alert('O arquivo deve ter no máximo 500KB');
         return;
       }
 
-      // Validar tipo do arquivo
       const allowedTypes = ['image/jpeg', 'image/png', 'image/svg+xml'];
       if (!allowedTypes.includes(file.type)) {
         alert('Apenas arquivos JPG, PNG ou SVG são permitidos');
@@ -158,8 +163,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
   };
 
   const onSubmit = async (data: any) => {
-    if (!team) {
-      setError('Equipe não encontrada');
+    if (!team || !canEdit) {
+      setError('Sem permissão para editar');
       return;
     }
     
@@ -171,7 +176,6 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
       
       let logoUrl = team.logoUrl;
       
-      // Upload do logo se houver arquivo novo
       if (logoFile) {
         console.log('Fazendo upload do logo...');
         const uploadedUrl = await adminService.uploadLogo(logoFile, team.id);
@@ -183,7 +187,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
       
       const updateData = {
         ...data,
-        phones: phones.filter(p => p.number), // Só salvar telefones com número
+        phones: phones.filter(p => p.number),
         address,
         logoUrl
       };
@@ -196,7 +200,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
         console.log('Equipe atualizada com sucesso');
         onUpdate(updatedTeam);
         alert('Dados do escritório salvos com sucesso!');
-        setLogoFile(null); // Limpar arquivo após sucesso
+        setLogoFile(null);
       } else {
         throw new Error('Falha ao atualizar equipe');
       }
@@ -210,13 +214,66 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
     }
   };
 
-  // CORRIGIDO: Função updateAddress simplificada
   const updateAddress = (field: keyof TeamAddress, value: string) => {
+    if (!canEdit) return;
+    
     setAddress(prev => ({
       ...prev,
       [field]: value
     }));
   };
+
+  // GUARD: Modo visualização se não puder editar
+  if (!canEdit) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <p className="text-sm text-amber-800">
+            ⚠️ Apenas o proprietário pode editar as configurações do escritório.
+          </p>
+        </div>
+        
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Informações do Escritório</h3>
+          <div className="space-y-4">
+            {team?.logoUrl && (
+              <div className="mb-4">
+                <img
+                  src={team.logoUrl}
+                  alt="Logo"
+                  className="w-24 h-24 rounded-lg object-cover border-2 border-gray-200"
+                />
+              </div>
+            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nome</label>
+              <p className="text-gray-900">{team?.name || 'Não informado'}</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">CPF/CNPJ</label>
+              <p className="text-gray-900">{team?.cpfCnpj || 'Não informado'}</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">OAB</label>
+              <p className="text-gray-900">{team?.oab || 'Não informado'}</p>
+            </div>
+            {team?.email && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <p className="text-gray-900">{team.email}</p>
+              </div>
+            )}
+            {team?.website && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
+                <p className="text-gray-900">{team.website}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -257,12 +314,12 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                 onChange={handleLogoChange}
                 className="hidden"
                 id="logo-upload"
-                disabled={loading}
+                disabled={loading || !canEdit}
               />
               <label
                 htmlFor="logo-upload"
                 className={`cursor-pointer inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors ${
-                  loading ? 'opacity-50 cursor-not-allowed' : ''
+                  loading || !canEdit ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
               >
                 <PhotoIcon className="w-4 h-4 mr-2" />
@@ -286,8 +343,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
               <input
                 {...register('name')}
                 type="text"
-                disabled={loading}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                disabled={loading || !canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                 placeholder="Ex: Silva & Associados Advocacia"
               />
               {errors.name && (
@@ -302,8 +359,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
               <input
                 {...register('cpfCnpj')}
                 type="text"
-                disabled={loading}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                disabled={loading || !canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                 placeholder="000.000.000-00 ou 00.000.000/0000-00"
               />
               {errors.cpfCnpj && (
@@ -318,8 +375,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
               <input
                 {...register('oab')}
                 type="text"
-                disabled={loading}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                disabled={loading || !canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                 placeholder="123456/SP"
               />
               {errors.oab && (
@@ -334,8 +391,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
               <input
                 {...register('ccm')}
                 type="text"
-                disabled={loading}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                disabled={loading || !canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                 placeholder="Cadastro de Contribuintes Mobiliários"
               />
             </div>
@@ -347,8 +404,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
               <input
                 {...register('email')}
                 type="email"
-                disabled={loading}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                disabled={loading || !canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                 placeholder="contato@escritorio.com"
               />
               {errors.email && (
@@ -363,8 +420,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
               <input
                 {...register('website')}
                 type="url"
-                disabled={loading}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                disabled={loading || !canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                 placeholder="https://www.escritorio.com"
               />
               {errors.website && (
@@ -379,8 +436,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
               <textarea
                 {...register('areaOfPractice')}
                 rows={3}
-                disabled={loading}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                disabled={loading || !canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                 placeholder="Ex: Direito Civil, Direito Trabalhista, Direito Empresarial..."
               />
             </div>
@@ -394,8 +451,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
             <button
               type="button"
               onClick={addPhone}
-              disabled={loading}
-              className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              disabled={loading || !canEdit}
+              className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <PlusIcon className="w-4 h-4 mr-2" />
               Adicionar Telefone
@@ -408,8 +465,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                 <select
                   value={phone.type}
                   onChange={(e) => updatePhone(phone.id, 'type', e.target.value)}
-                  disabled={loading}
-                  className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  disabled={loading || !canEdit}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                 >
                   <option value="Telefone comercial">Telefone comercial</option>
                   <option value="Celular comercial">Celular comercial</option>
@@ -423,8 +480,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                   type="text"
                   value={phone.number}
                   onChange={(e) => updatePhone(phone.id, 'number', adminService.formatPhone(e.target.value))}
-                  disabled={loading}
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  disabled={loading || !canEdit}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                   placeholder="(11) 99999-9999"
                 />
                 
@@ -433,8 +490,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                     type="text"
                     value={phone.operator || ''}
                     onChange={(e) => updatePhone(phone.id, 'operator', e.target.value)}
-                    disabled={loading}
-                    className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                    disabled={loading || !canEdit}
+                    className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                     placeholder="Operadora"
                   />
                 )}
@@ -442,8 +499,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                 <button
                   type="button"
                   onClick={() => removePhone(phone.id)}
-                  disabled={loading}
-                  className="text-red-600 hover:text-red-800 p-2 rounded hover:bg-red-50 disabled:opacity-50"
+                  disabled={loading || !canEdit}
+                  className="text-red-600 hover:text-red-800 p-2 rounded hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <XMarkIcon className="w-4 h-4" />
                 </button>
@@ -456,7 +513,7 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
           </div>
         </div>
 
-        {/* Address Section - CORRIGIDO */}
+        {/* Address Section */}
         <div>
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Endereço</h3>
           
@@ -468,8 +525,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
               <select
                 value={address.type}
                 onChange={(e) => updateAddress('type', e.target.value)}
-                disabled={loading}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                disabled={loading || !canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
               >
                 <option value="Comercial">Comercial</option>
                 <option value="Pessoal">Pessoal</option>
@@ -485,8 +542,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                   type="text"
                   value={address.cep}
                   onChange={(e) => updateAddress('cep', adminService.formatCep(e.target.value))}
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                   placeholder="00000-000"
                 />
               </div>
@@ -499,8 +556,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                   type="text"
                   value={address.street}
                   onChange={(e) => updateAddress('street', e.target.value)}
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                   placeholder="Rua, número"
                 />
               </div>
@@ -513,8 +570,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                   type="text"
                   value={address.complement || ''}
                   onChange={(e) => updateAddress('complement', e.target.value)}
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                   placeholder="Sala, andar, etc."
                 />
               </div>
@@ -527,8 +584,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                   type="text"
                   value={address.city}
                   onChange={(e) => updateAddress('city', e.target.value)}
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                   placeholder="São Paulo"
                 />
               </div>
@@ -540,8 +597,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                 <select
                   value={address.state}
                   onChange={(e) => updateAddress('state', e.target.value)}
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                 >
                   <option value="">Selecione o estado</option>
                   <option value="AC">Acre</option>
@@ -582,8 +639,8 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
                   type="text"
                   value={address.country}
                   onChange={(e) => updateAddress('country', e.target.value)}
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-100"
                   placeholder="Brasil"
                 />
               </div>
@@ -596,15 +653,15 @@ export default function OfficeTab({ team, onUpdate }: OfficeTabProps) {
           <button
             type="button"
             onClick={() => window.location.reload()}
-            disabled={loading}
-            className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+            disabled={loading || !canEdit}
+            className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancelar
           </button>
           <button
             type="submit"
-            disabled={loading}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center"
+            disabled={loading || !canEdit}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
           >
             {loading ? (
               <>

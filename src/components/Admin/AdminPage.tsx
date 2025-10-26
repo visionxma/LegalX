@@ -1,8 +1,10 @@
+// src/components/Admin/AdminPage.tsx
 import React, { useState, useEffect } from 'react';
 import { ArrowLeftIcon, CogIcon } from '@heroicons/react/24/outline';
 import { auth } from '../../firebase.config';
 import { adminService } from '../../services/adminService';
 import { Team } from '../../types/admin';
+import { useTeam } from '../../contexts/TeamContext';
 import OfficeTab from './OfficeTab';
 import TeamTab from './TeamTab';
 import AccessTab from './AccessTab';
@@ -16,17 +18,27 @@ export default function AdminPage({ onBack }: AdminPageProps) {
   const [team, setTeam] = useState<Team | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // NOVO: Verificar permissões
+  const { isOwner, isSoloMode, checkPermission } = useTeam();
+  const canAccessAdmin = isSoloMode || isOwner || checkPermission('configuracoes');
 
   useEffect(() => {
+    // GUARD: Redirecionar se não tiver permissão
+    if (!canAccessAdmin && !loading) {
+      alert('Você não possui permissão para acessar a área administrativa.');
+      onBack();
+      return;
+    }
+    
     loadTeamData();
-  }, []);
+  }, [canAccessAdmin]);
 
   const loadTeamData = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // Aguardar autenticação do Firebase
       if (!auth.currentUser) {
         console.log('Aguardando autenticação...');
         await new Promise((resolve) => {
@@ -52,7 +64,6 @@ export default function AdminPage({ onBack }: AdminPageProps) {
     } catch (error: any) {
       console.error('Erro ao carregar dados da administração:', error);
       
-      // Tratamento de erro mais específico
       let errorMessage = 'Erro ao carregar dados da administração';
       
       if (error.code === 'permission-denied') {
@@ -109,6 +120,29 @@ export default function AdminPage({ onBack }: AdminPageProps) {
     }
   };
 
+  // GUARD: Bloquear acesso se não tiver permissão
+  if (!canAccessAdmin && !loading) {
+    return (
+      <div className="p-6">
+        <div className="max-w-md mx-auto text-center py-12">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <CogIcon className="w-8 h-8 text-red-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Acesso Negado</h2>
+          <p className="text-gray-600 mb-4">
+            Você não possui permissão para acessar a área administrativa.
+          </p>
+          <button
+            onClick={onBack}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Voltar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="p-6">
@@ -151,20 +185,11 @@ export default function AdminPage({ onBack }: AdminPageProps) {
               Recarregar Página
             </button>
           </div>
-          
-          {/* Debug Info */}
-          <div className="mt-4 p-3 bg-gray-100 rounded text-left text-xs">
-            <p><strong>Debug:</strong></p>
-            <p>Usuário: {auth.currentUser?.uid || 'Não autenticado'}</p>
-            <p>Email: {auth.currentUser?.email || 'Não encontrado'}</p>
-            <p>Erro: {error}</p>
-          </div>
         </div>
       </div>
     );
   }
 
-  // Se não há equipe, mostrar opção para criar
   if (!team) {
     return (
       <div className="p-6">
@@ -232,21 +257,24 @@ export default function AdminPage({ onBack }: AdminPageProps) {
             </button>
             <button
               onClick={() => setActiveTab('team')}
+              disabled={!isOwner && !checkPermission('equipe')}
               className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                 activeTab === 'team'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
+              } ${!isOwner && !checkPermission('equipe') ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               Grupo de Envolvidos
             </button>
             <button
               onClick={() => setActiveTab('access')}
+              disabled={!isOwner}
               className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                 activeTab === 'access'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
+              } ${!isOwner ? 'opacity-50 cursor-not-allowed' : ''}`}
+              title={!isOwner ? 'Apenas o proprietário pode gerenciar acessos' : ''}
             >
               Acesso
             </button>

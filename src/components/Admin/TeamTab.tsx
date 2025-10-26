@@ -1,13 +1,8 @@
-// DIFF: src/components/Admin/TeamTab.tsx
-// Principais mudanças:
-// - createInvitation agora retorna link direto
-// - Interface mostra link completo para copiar
-// - Instruções para envio manual
-// - Remoção de dependência de tokens temporários
-
+// src/components/Admin/TeamTab.tsx
 import React, { useState, useEffect } from 'react';
 import { Team, TeamInvitation } from '../../types/admin';
 import { adminService } from '../../services/adminService';
+import { useTeam } from '../../contexts/TeamContext';
 import { 
   PlusIcon, 
   ClipboardDocumentIcon, 
@@ -38,6 +33,10 @@ export default function TeamTab({ team }: TeamTabProps) {
   const [lastCreatedLink, setLastCreatedLink] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
+  // NOVO: Verificar permissões
+  const { isOwner, isSoloMode, checkPermission } = useTeam();
+  const canManageTeam = isSoloMode || isOwner || checkPermission('equipe');
+
   useEffect(() => {
     if (team) {
       loadInvitations();
@@ -58,9 +57,8 @@ export default function TeamTab({ team }: TeamTabProps) {
     }
   };
 
-  // ATUALIZADO: handleCreateInvite agora recebe link direto
   const handleCreateInvite = async () => {
-    if (!team || !inviteEmail.trim()) return;
+    if (!team || !inviteEmail.trim() || !canManageTeam) return;
     
     try {
       setLoading(true);
@@ -95,6 +93,11 @@ export default function TeamTab({ team }: TeamTabProps) {
   };
 
   const handleCancelInvite = async (inviteId: string) => {
+    if (!canManageTeam) {
+      alert('Você não possui permissão para cancelar convites.');
+      return;
+    }
+    
     if (confirm('Tem certeza que deseja cancelar este convite?')) {
       try {
         const success = await adminService.cancelInvitation(inviteId);
@@ -108,7 +111,6 @@ export default function TeamTab({ team }: TeamTabProps) {
     }
   };
 
-  // NOVO: Copiar link seguro
   const copyInviteLink = async (link: string) => {
     try {
       await navigator.clipboard.writeText(link);
@@ -116,7 +118,6 @@ export default function TeamTab({ team }: TeamTabProps) {
       setTimeout(() => setCopiedLink(false), 2000);
     } catch (error) {
       console.error('Erro ao copiar:', error);
-      // Fallback para browsers sem clipboard API
       const textarea = document.createElement('textarea');
       textarea.value = link;
       document.body.appendChild(textarea);
@@ -132,7 +133,6 @@ export default function TeamTab({ team }: TeamTabProps) {
     }
   };
 
-  // NOVO: Abrir mailto com link
   const openMailto = (email: string, link: string) => {
     const subject = encodeURIComponent(`Convite para ${team?.name} - LegalX`);
     const body = encodeURIComponent(`
@@ -225,6 +225,30 @@ Equipe LegalX
     const hoursUntilExpiry = (expiry.getTime() - now.getTime()) / (1000 * 60 * 60);
     return hoursUntilExpiry <= 6 && hoursUntilExpiry > 0;
   };
+
+  // GUARD: Modo visualização se não puder gerenciar
+  if (!canManageTeam) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <p className="text-sm text-amber-800">
+            ⚠️ Você não possui permissão para gerenciar convites da equipe.
+          </p>
+        </div>
+        
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Convites da Equipe</h3>
+          {loadingInvites ? (
+            <p className="text-gray-500">Carregando...</p>
+          ) : (
+            <p className="text-gray-600">
+              {invitations.length} convite(s) registrado(s)
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!team) {
     return (
@@ -321,7 +345,7 @@ Equipe LegalX
         </div>
       )}
 
-      {/* NOVO: Link recém-criado */}
+      {/* Link recém-criado */}
       {lastCreatedLink && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-6">
           <div className="flex items-start space-x-3">
@@ -480,7 +504,7 @@ Equipe LegalX
         </div>
       </div>
 
-      {/* NOVO: Manual sending instructions */}
+      {/* Manual sending instructions */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
         <h4 className="text-sm font-semibold text-blue-800 mb-2">💡 Como Enviar Convites</h4>
         <div className="text-sm text-blue-700 space-y-2">
