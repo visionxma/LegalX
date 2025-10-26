@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Routes, Route, useLocation } from "react-router-dom"
 import AuthWrapper from "./components/Auth/AuthWrapper"
+import { TeamProvider } from "./contexts/TeamContext" 
 import Header from "./components/Layout/Header"
 import Sidebar from "./components/Layout/Sidebar"
 import Dashboard from "./components/Dashboard/Dashboard"
@@ -273,17 +274,19 @@ function App() {
   }
 
   const renderApp = (user: User) => (
-    <div className="flex flex-col h-screen bg-gray-50">
-      <Header user={user} onLogout={handleLogout} onOpenAdmin={handleOpenAdmin} />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar
-          activeSection={activeSection}
-          onSectionChange={handleSectionChange}
-          onQuickAction={handleQuickAction}
-        />
-        <main className="flex-1 overflow-auto">{renderContent()}</main>
+    <TeamProvider> {/* NOVO: Envolver tudo com TeamProvider */}
+      <div className="flex flex-col h-screen bg-gray-50">
+        <Header user={user} onLogout={handleLogout} onOpenAdmin={handleOpenAdmin} />
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar
+            activeSection={activeSection}
+            onSectionChange={handleSectionChange}
+            onQuickAction={handleQuickAction}
+          />
+          <main className="flex-1 overflow-auto">{renderContent()}</main>
+        </div>
       </div>
-    </div>
+    </TeamProvider>
   )
 
   return (

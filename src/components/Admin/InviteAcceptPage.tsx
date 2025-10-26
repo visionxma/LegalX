@@ -9,6 +9,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { adminService } from '../../services/adminService';
 import { TeamInvitation, InviteValidationResult } from '../../types/admin';
+import { useTeam } from '../../contexts/TeamContext'; // NOVO
 import { CheckCircleIcon, ExclamationTriangleIcon, ClockIcon, UserPlusIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
