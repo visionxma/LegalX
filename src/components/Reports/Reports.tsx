@@ -1,3 +1,4 @@
+// src/components/Reports/Reports.tsx - COM PERMISSION GUARDS
 import React, { useState, useEffect } from 'react';
 import { 
   DocumentChartBarIcon,
@@ -21,10 +22,12 @@ import {
   Cell
 } from 'recharts';
 import { firestoreService } from '../../services/firestoreService';
+import { usePermissionCheck } from '../Common/withPermission'; // NOVO
+import { useTeam } from '../../contexts/TeamContext'; // NOVO
 import { Process, CalendarEvent } from '../../types';
 import jsPDF from 'jspdf';
 
-export default function Reports() {
+function Reports() {
   const [selectedPeriod, setSelectedPeriod] = useState('month');
   const [processes, setProcesses] = useState<Process[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -35,6 +38,12 @@ export default function Reports() {
     monthlyData: []
   });
   const [loading, setLoading] = useState(true);
+
+  // NOVO: Permission checks
+  const { hasPermission } = usePermissionCheck();
+  const { isSoloMode, activeTeam } = useTeam();
+  
+  const canExport = hasPermission('relatorios');
 
   useEffect(() => {
     loadReportData();
@@ -92,21 +101,25 @@ export default function Reports() {
   };
 
   const generatePDFReport = () => {
+    if (!canExport) {
+      alert('Você não possui permissão para exportar relatórios.');
+      return;
+    }
+
     const doc = new jsPDF();
     
     // Cores da identidade visual
-    const primaryBlue = [37, 99, 235]; // #2563eb
-    const accentAmber = [245, 158, 11]; // #f59e0b
-    const darkGray = [55, 65, 81]; // #374151
-    const lightGray = [156, 163, 175]; // #9ca3af
-    const successGreen = [34, 197, 94]; // #22c55e
-    const dangerRed = [239, 68, 68]; // #ef4444
+    const primaryBlue = [37, 99, 235];
+    const accentAmber = [245, 158, 11];
+    const darkGray = [55, 65, 81];
+    const lightGray = [156, 163, 175];
+    const successGreen = [34, 197, 94];
+    const dangerRed = [239, 68, 68];
     
-    // Header com logo e identidade visual
+    // Header
     doc.setFillColor(...primaryBlue);
     doc.rect(0, 0, 210, 25, 'F');
     
-    // Logo LegalX
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(24);
     doc.setFont(undefined, 'bold');
@@ -114,19 +127,17 @@ export default function Reports() {
     doc.setTextColor(...accentAmber);
     doc.text('X', 50, 17);
     
-    // Subtítulo
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(10);
     doc.setFont(undefined, 'normal');
     doc.text('Sistema de Gestão Jurídica', 20, 22);
     
-    // Título do documento
+    // Título
     doc.setTextColor(...darkGray);
     doc.setFontSize(18);
     doc.setFont(undefined, 'bold');
     doc.text('RELATÓRIO FINANCEIRO E OPERACIONAL', 105, 45, { align: 'center' });
     
-    // Linha decorativa
     doc.setDrawColor(...accentAmber);
     doc.setLineWidth(2);
     doc.line(20, 50, 190, 50);
@@ -138,15 +149,14 @@ export default function Reports() {
     
     let yPosition = 70;
     
-    // Resumo Financeiro com boxes coloridos
+    // Resumo Financeiro
     doc.setTextColor(...darkGray);
     doc.setFontSize(14);
     doc.setFont(undefined, 'bold');
     doc.text('RESUMO FINANCEIRO', 20, yPosition);
     yPosition += 15;
     
-    // Box para receitas
-    doc.setFillColor(240, 253, 244); // bg-green-50
+    doc.setFillColor(240, 253, 244);
     doc.setDrawColor(...successGreen);
     doc.setLineWidth(0.5);
     doc.roundedRect(20, yPosition - 5, 170, 12, 2, 2, 'FD');
@@ -157,8 +167,7 @@ export default function Reports() {
     doc.text(`✓ Total de Receitas: ${formatCurrency(totalRevenue)}`, 25, yPosition + 3);
     yPosition += 10;
     
-    // Box para despesas
-    doc.setFillColor(254, 242, 242); // bg-red-50
+    doc.setFillColor(254, 242, 242);
     doc.setDrawColor(...dangerRed);
     doc.roundedRect(20, yPosition - 5, 170, 12, 2, 2, 'FD');
     
@@ -166,7 +175,6 @@ export default function Reports() {
     doc.text(`✗ Total de Despesas: ${formatCurrency(totalExpenses)}`, 25, yPosition + 3);
     yPosition += 10;
     
-    // Box para lucro líquido
     const profitColor = netProfit >= 0 ? successGreen : dangerRed;
     const profitBg = netProfit >= 0 ? [240, 253, 244] : [254, 242, 242];
     doc.setFillColor(...profitBg);
@@ -212,7 +220,7 @@ export default function Reports() {
     yPosition += 10;
     doc.text(`• Taxa de Conclusão: ${totalEvents > 0 ? ((completedEvents / totalEvents) * 100).toFixed(1) : 0}%`, 25, yPosition);
     
-    // Footer com informações do sistema
+    // Footer
     doc.setDrawColor(...lightGray);
     doc.setLineWidth(0.5);
     doc.line(20, 280, 190, 280);
@@ -222,8 +230,6 @@ export default function Reports() {
     doc.setFont(undefined, 'normal');
     doc.text('Relatório gerado pelo LegalX - Sistema de Gestão Jurídica', 20, 285);
     doc.text(`Data de geração: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 20, 290);
-    
-    // Número da página
     doc.text('Página 1 de 1', 190, 290, { align: 'right' });
     
     doc.save(`relatorio_${selectedPeriod}_${new Date().toISOString().split('T')[0]}.pdf`);
@@ -242,6 +248,12 @@ export default function Reports() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Relatórios</h1>
           <p className="text-gray-600">Análise completa dos dados do escritório</p>
+          {/* NOVO: Indicador de contexto */}
+          {!isSoloMode && activeTeam && (
+            <p className="text-xs text-blue-600 mt-1">
+              📊 Visualizando relatórios da equipe: {activeTeam.name}
+            </p>
+          )}
         </div>
         <div className="flex items-center space-x-4">
           <select
@@ -255,13 +267,28 @@ export default function Reports() {
           </select>
           <button
             onClick={generatePDFReport}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            disabled={!canExport}
+            className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+              canExport
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+            title={!canExport ? 'Sem permissão para exportar relatórios' : 'Exportar PDF'}
           >
             <ArrowDownTrayIcon className="w-5 h-5 mr-2" />
             Exportar PDF
           </button>
         </div>
       </div>
+
+      {/* NOVO: Mensagem de permissão */}
+      {!canExport && !isSoloMode && (
+        <div className="mb-6 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <p className="text-sm text-amber-800">
+            ℹ️ Você pode visualizar os relatórios, mas não possui permissão para exportá-los.
+          </p>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -373,7 +400,7 @@ export default function Reports() {
             </div>
             <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
               <span className="text-gray-600">Margem de Lucro</span>
-              <span className="font-semibold">{((netProfit / totalRevenue) * 100).toFixed(1)}%</span>
+              <span className="font-semibold">{totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : 0}%</span>
             </div>
           </div>
         </div>
@@ -392,7 +419,7 @@ export default function Reports() {
             </div>
             <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
               <span className="text-gray-600">Taxa de Conclusão</span>
-              <span className="font-semibold">{((completedProcesses / (activeProcesses + completedProcesses)) * 100).toFixed(1)}%</span>
+              <span className="font-semibold">{activeProcesses + completedProcesses > 0 ? ((completedProcesses / (activeProcesses + completedProcesses)) * 100).toFixed(1) : 0}%</span>
             </div>
             <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
               <span className="text-gray-600">Eventos Realizados</span>
@@ -404,3 +431,10 @@ export default function Reports() {
     </div>
   );
 }
+
+// NOVO: Exportar com guard
+import { withPermission } from '../Common/withPermission';
+
+export default withPermission(Reports, 'relatorios', 'any', {
+  showMessage: true
+});

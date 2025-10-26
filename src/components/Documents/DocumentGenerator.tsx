@@ -1,8 +1,11 @@
+// src/components/Documents/DocumentGenerator.tsx - COM PERMISSION GUARDS
 import React, { useState, useEffect } from 'react';
 import PowerOfAttorneyForm from './PowerOfAttorneyForm';
 import ReceiptForm from './ReceiptForm';
 import DocumentViewer from './DocumentViewer';
 import { firestoreService } from '../../services/firestoreService';
+import { usePermissionCheck } from '../Common/withPermission'; // NOVO
+import { useTeam } from '../../contexts/TeamContext'; // NOVO
 import { Document } from '../../types';
 import { DocumentTextIcon, ReceiptPercentIcon, EyeIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import { format } from 'date-fns';
@@ -13,21 +16,32 @@ interface DocumentGeneratorProps {
   onClearQuickAction: () => void;
 }
 
-export default function DocumentGenerator({ quickActionType, onClearQuickAction }: DocumentGeneratorProps) {
+function DocumentGenerator({ quickActionType, onClearQuickAction }: DocumentGeneratorProps) {
   const [activeDocument, setActiveDocument] = useState<'power-of-attorney' | 'receipt' | null>(null);
   const [viewingDocument, setViewingDocument] = useState<Document | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // NOVO: Permission checks
+  const { hasPermission } = usePermissionCheck();
+  const { isSoloMode, activeTeam } = useTeam();
+  
+  const canCreate = hasPermission('documentos');
+  const canView = true; // Visualizar sempre permitido
+  const canDelete = hasPermission('documentos');
+
   useEffect(() => {
-    if (quickActionType === 'power-of-attorney') {
+    if (quickActionType === 'power-of-attorney' && canCreate) {
       setActiveDocument('power-of-attorney');
       onClearQuickAction();
-    } else if (quickActionType === 'receipt') {
+    } else if (quickActionType === 'receipt' && canCreate) {
       setActiveDocument('receipt');
       onClearQuickAction();
+    } else if ((quickActionType === 'power-of-attorney' || quickActionType === 'receipt') && !canCreate) {
+      alert('Você não possui permissão para criar documentos.');
+      onClearQuickAction();
     }
-  }, [quickActionType, onClearQuickAction]);
+  }, [quickActionType, onClearQuickAction, canCreate]);
 
   useEffect(() => {
     loadDocuments();
@@ -51,6 +65,14 @@ export default function DocumentGenerator({ quickActionType, onClearQuickAction 
 
   const handleBackFromViewer = () => {
     setViewingDocument(null);
+  };
+
+  const handleCreateDocument = (type: 'power-of-attorney' | 'receipt') => {
+    if (!canCreate) {
+      alert('Você não possui permissão para criar documentos.');
+      return;
+    }
+    setActiveDocument(type);
   };
 
   if (activeDocument === 'power-of-attorney') {
@@ -86,16 +108,37 @@ export default function DocumentGenerator({ quickActionType, onClearQuickAction 
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Gerador de Documentos</h1>
         <p className="text-gray-600">Crie documentos jurídicos profissionais</p>
+        {/* NOVO: Indicador de contexto */}
+        {!isSoloMode && activeTeam && (
+          <p className="text-xs text-blue-600 mt-1">
+            📄 Visualizando documentos da equipe: {activeTeam.name}
+          </p>
+        )}
       </div>
+
+      {/* NOVO: Mensagem de permissão */}
+      {!canCreate && !isSoloMode && (
+        <div className="mb-6 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <p className="text-sm text-amber-800">
+            ⚠️ Você possui acesso somente leitura. Não é possível criar novos documentos.
+          </p>
+        </div>
+      )}
 
       {/* Document Types */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl">
         <div
-          onClick={() => setActiveDocument('power-of-attorney')}
-          className="bg-white rounded-lg shadow-md border-2 border-transparent hover:border-blue-300 transition-all cursor-pointer group"
+          onClick={() => handleCreateDocument('power-of-attorney')}
+          className={`bg-white rounded-lg shadow-md border-2 transition-all ${
+            canCreate 
+              ? 'border-transparent hover:border-blue-300 cursor-pointer group' 
+              : 'border-gray-200 opacity-60 cursor-not-allowed'
+          }`}
         >
           <div className="p-8 text-center">
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-200 transition-colors">
+            <div className={`w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 transition-colors ${
+              canCreate ? 'group-hover:bg-blue-200' : ''
+            }`}>
               <DocumentTextIcon className="w-8 h-8 text-blue-600" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">Procuração</h3>
@@ -107,18 +150,31 @@ export default function DocumentGenerator({ quickActionType, onClearQuickAction 
               <p>• Procuração para fins específicos</p>
               <p>• Geração em PDF e DOCX</p>
             </div>
-            <button className="mt-6 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-              Criar Procuração
+            <button 
+              disabled={!canCreate}
+              className={`mt-6 w-full px-4 py-2 rounded-lg transition-colors ${
+                canCreate
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+            >
+              {canCreate ? 'Criar Procuração' : 'Sem Permissão'}
             </button>
           </div>
         </div>
 
         <div
-          onClick={() => setActiveDocument('receipt')}
-          className="bg-white rounded-lg shadow-md border-2 border-transparent hover:border-green-300 transition-all cursor-pointer group"
+          onClick={() => handleCreateDocument('receipt')}
+          className={`bg-white rounded-lg shadow-md border-2 transition-all ${
+            canCreate 
+              ? 'border-transparent hover:border-green-300 cursor-pointer group' 
+              : 'border-gray-200 opacity-60 cursor-not-allowed'
+          }`}
         >
           <div className="p-8 text-center">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-green-200 transition-colors">
+            <div className={`w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 transition-colors ${
+              canCreate ? 'group-hover:bg-green-200' : ''
+            }`}>
               <ReceiptPercentIcon className="w-8 h-8 text-green-600" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">Recibo</h3>
@@ -130,8 +186,15 @@ export default function DocumentGenerator({ quickActionType, onClearQuickAction 
               <p>• Recibo de consultoria jurídica</p>
               <p>• Geração em PDF</p>
             </div>
-            <button className="mt-6 w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-              Criar Recibo
+            <button 
+              disabled={!canCreate}
+              className={`mt-6 w-full px-4 py-2 rounded-lg transition-colors ${
+                canCreate
+                  ? 'bg-green-600 text-white hover:bg-green-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+            >
+              {canCreate ? 'Criar Recibo' : 'Sem Permissão'}
             </button>
           </div>
         </div>
@@ -148,7 +211,10 @@ export default function DocumentGenerator({ quickActionType, onClearQuickAction 
           ) : documents.length === 0 ? (
             <div className="p-6">
               <p className="text-gray-500 text-center">
-                Nenhum documento gerado ainda
+                {canCreate 
+                  ? 'Nenhum documento gerado ainda. Clique em um dos tipos acima para começar.'
+                  : 'Nenhum documento gerado ainda.'
+                }
               </p>
             </div>
           ) : (
@@ -190,3 +256,10 @@ export default function DocumentGenerator({ quickActionType, onClearQuickAction 
     </div>
   );
 }
+
+// NOVO: Exportar com guard
+import { withPermission } from '../Common/withPermission';
+
+export default withPermission(DocumentGenerator, 'documentos', 'any', {
+  showMessage: true
+});
