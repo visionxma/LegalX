@@ -1,8 +1,8 @@
-// src/contexts/TeamContext.tsx - VERSÃO ATUALIZADA COM INTEGRAÇÃO
+// src/contexts/TeamContext.tsx - VERSÃO COMPLETA E CORRIGIDA
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { auth } from '../firebase.config';
 import { adminService } from '../services/adminService';
-import { firestoreService } from '../services/firestoreService'; // INTEGRAÇÃO
+import { firestoreService } from '../services/firestoreService';
 import { Team, TeamMember, TeamPermissions } from '../types/admin';
 
 interface TeamContextData {
@@ -11,12 +11,12 @@ interface TeamContextData {
   currentMember: TeamMember | null;
   permissions: TeamPermissions | null;
   isOwner: boolean;
-  isSoloMode: boolean; // NOVO
+  isSoloMode: boolean;
   loading: boolean;
   
   // Funções
-  switchToTeam: () => Promise<void>; // NOVO: Alternar para modo equipe
-  switchToSolo: () => void; // NOVO: Alternar para modo solo
+  switchToTeam: () => Promise<void>;
+  switchToSolo: () => void;
   refreshTeamData: () => Promise<void>;
   checkPermission: (module: keyof TeamPermissions) => boolean;
 }
@@ -32,7 +32,7 @@ export function TeamProvider({ children }: TeamProviderProps) {
   const [currentMember, setCurrentMember] = useState<TeamMember | null>(null);
   const [permissions, setPermissions] = useState<TeamPermissions | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isSoloMode, setIsSoloMode] = useState(true); // NOVO: padrão é modo solo
+  const [isSoloMode, setIsSoloMode] = useState(true); // Padrão: modo solo
 
   const isOwner = activeTeam?.ownerUid === auth.currentUser?.uid;
 
@@ -76,18 +76,21 @@ export function TeamProvider({ children }: TeamProviderProps) {
         setCurrentMember(member || null);
         setPermissions(member?.permissions || null);
         
-        // NÃO ativa automaticamente o modo equipe
-        // O usuário escolhe via seletor
+        console.log('✅ Team data carregado:', {
+          team: team.name,
+          member: member?.role,
+          permissions: member?.permissions
+        });
       }
     } catch (error) {
-      console.error('Erro ao carregar team data:', error);
+      console.error('❌ Erro ao carregar team data:', error);
     }
   };
 
-  // NOVO: Alternar para modo equipe
+  // Alternar para modo equipe
   const switchToTeam = async () => {
     if (!activeTeam) {
-      console.warn('Nenhuma equipe disponível para ativar');
+      console.warn('⚠️ Nenhuma equipe disponível para ativar');
       return;
     }
     
@@ -95,11 +98,10 @@ export function TeamProvider({ children }: TeamProviderProps) {
     firestoreService.setActiveTeam(activeTeam.id);
     console.log('✅ Modo EQUIPE ativado:', activeTeam.name);
     
-    // Recarregar dados do contexto da equipe
     await refreshTeamData();
   };
 
-  // NOVO: Alternar para modo solo
+  // Alternar para modo solo
   const switchToSolo = () => {
     setIsSoloMode(true);
     firestoreService.setActiveTeam(null);
@@ -111,13 +113,13 @@ export function TeamProvider({ children }: TeamProviderProps) {
   };
 
   const checkPermission = (module: keyof TeamPermissions): boolean => {
-    // Em modo solo, usuário tem todas as permissões
+    // Modo solo: usuário tem TODAS as permissões
     if (isSoloMode) return true;
     
-    // Em modo equipe: owner sempre tem permissão
+    // Modo equipe: owner sempre tem permissão
     if (isOwner) return true;
     
-    // Demais membros: verificar permissões
+    // Demais membros: verificar permissões específicas
     return permissions?.[module] || false;
   };
 

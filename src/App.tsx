@@ -1,7 +1,8 @@
+// src/App.tsx - ATUALIZADO COM TEAMPROVIDER
 import { useState } from "react"
-import { Routes, Route, useLocation } from "react-router-dom"
+import { Routes, Route } from "react-router-dom"
 import AuthWrapper from "./components/Auth/AuthWrapper"
-import { TeamProvider } from "./contexts/TeamContext" 
+import { TeamProvider } from "./contexts/TeamContext" // IMPORTAR
 import Header from "./components/Layout/Header"
 import Sidebar from "./components/Layout/Sidebar"
 import Dashboard from "./components/Dashboard/Dashboard"
@@ -26,7 +27,6 @@ import type { User } from "./types/auth"
 import { authService } from "./services/authService"
 
 function App() {
-  const location = useLocation()
   const [activeSection, setActiveSection] = useState("dashboard")
   const [showAdmin, setShowAdmin] = useState(false)
   const [selectedProcess, setSelectedProcess] = useState<Process | null>(null)
@@ -274,7 +274,7 @@ function App() {
   }
 
   const renderApp = (user: User) => (
-    <TeamProvider> {/* NOVO: Envolver tudo com TeamProvider */}
+    <TeamProvider> {/* ENVOLVER COM TEAMPROVIDER */}
       <div className="flex flex-col h-screen bg-gray-50">
         <Header user={user} onLogout={handleLogout} onOpenAdmin={handleOpenAdmin} />
         <div className="flex flex-1 overflow-hidden">
@@ -291,10 +291,10 @@ function App() {
 
   return (
     <Routes>
-      {/* ROTA PÚBLICA PARA ACEITAR CONVITES - DEVE FICAR PRIMEIRO */}
+      {/* ROTA PÚBLICA PARA ACEITAR CONVITES */}
       <Route path="/aceitar" element={<InviteAcceptPage />} />
       
-      {/* ROTAS PROTEGIDAS POR AUTENTICAÇÃO */}
+      {/* ROTAS PROTEGIDAS */}
       <Route path="/*" element={<AuthWrapper>{renderApp}</AuthWrapper>} />
     </Routes>
   )

@@ -1,11 +1,4 @@
-/**
- * Serviço de Firestore ATUALIZADO com suporte a Equipes
- * 
- * Este serviço gerencia persistência com isolamento por usuário OU por equipe.
- * Quando há uma equipe ativa, salva em /teams/{teamId}/subcoleções
- * Quando em modo solo, salva em /userData/{userId}/subcoleções
- */
-
+// src/services/firestoreService.ts - ATUALIZADO COM SUPORTE A EQUIPES
 import {
   collection,
   doc,
@@ -25,19 +18,19 @@ import { Process, CalendarEvent, Revenue, Expense, Document, Lawyer, Employee } 
 
 class FirestoreService {
   
-  // NOVO: Contexto de equipe ativa
+  // CONTEXTO DE EQUIPE ATIVA
   private activeTeamId: string | null = null;
   
   /**
-   * NOVO: Definir equipe ativa
+   * Definir equipe ativa (chamado pelo TeamContext)
    */
   setActiveTeam(teamId: string | null) {
     this.activeTeamId = teamId;
-    console.log('Equipe ativa alterada:', teamId || 'Modo Solo');
+    console.log('🔄 Contexto Firestore alterado:', teamId ? `Equipe: ${teamId}` : 'Modo Solo');
   }
   
   /**
-   * NOVO: Obter equipe ativa
+   * Obter equipe ativa
    */
   getActiveTeam(): string | null {
     return this.activeTeamId;
@@ -62,10 +55,12 @@ class FirestoreService {
   private getCollection(collectionName: string) {
     if (this.activeTeamId) {
       // Modo Equipe: dados compartilhados
+      console.log(`📁 Acessando: teams/${this.activeTeamId}/${collectionName}`);
       return collection(db, 'teams', this.activeTeamId, collectionName);
     } else {
       // Modo Solo: dados pessoais
       const userId = this.getCurrentUserId();
+      console.log(`📁 Acessando: userData/${userId}/${collectionName}`);
       return collection(db, 'userData', userId, collectionName);
     }
   }
@@ -92,9 +87,9 @@ class FirestoreService {
     }
   }
 
-  /**
-   * PROCESSOS - Métodos CRUD
-   */
+  // ==========================================
+  // PROCESSOS
+  // ==========================================
   
   async getProcesses(): Promise<Process[]> {
     try {
@@ -109,7 +104,7 @@ class FirestoreService {
         createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || doc.data().createdAt
       })) as Process[];
     } catch (error) {
-      console.error('Erro ao buscar processos:', error);
+      console.error('❌ Erro ao buscar processos:', error);
       return [];
     }
   }
@@ -131,7 +126,7 @@ class FirestoreService {
       
       return null;
     } catch (error) {
-      console.error('Erro ao buscar processo:', error);
+      console.error('❌ Erro ao buscar processo:', error);
       return null;
     }
   }
@@ -141,7 +136,7 @@ class FirestoreService {
       const processData = this.addContextFields(process);
       const docRef = await addDoc(this.getCollection('processes'), processData);
       
-      console.log('Processo salvo:', docRef.id, 'Contexto:', this.activeTeamId ? 'Equipe' : 'Solo');
+      console.log('✅ Processo salvo:', docRef.id, 'Contexto:', this.activeTeamId ? 'Equipe' : 'Solo');
       
       return {
         id: docRef.id,
@@ -149,7 +144,7 @@ class FirestoreService {
         createdAt: new Date().toISOString()
       };
     } catch (error) {
-      console.error('Erro ao salvar processo:', error);
+      console.error('❌ Erro ao salvar processo:', error);
       return null;
     }
   }
@@ -164,10 +159,10 @@ class FirestoreService {
         updatedAt: Timestamp.now()
       });
       
-      console.log('Processo atualizado:', id);
+      console.log('✅ Processo atualizado:', id);
       return await this.getProcessById(id);
     } catch (error) {
-      console.error('Erro ao atualizar processo:', error);
+      console.error('❌ Erro ao atualizar processo:', error);
       return null;
     }
   }
@@ -178,17 +173,17 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
-      console.log('Processo excluído:', id);
+      console.log('✅ Processo excluído:', id);
       return true;
     } catch (error) {
-      console.error('Erro ao excluir processo:', error);
+      console.error('❌ Erro ao excluir processo:', error);
       return false;
     }
   }
 
-  /**
-   * EVENTOS - Métodos CRUD (seguem o mesmo padrão)
-   */
+  // ==========================================
+  // EVENTOS (mesmo padrão)
+  // ==========================================
   
   async getEvents(): Promise<CalendarEvent[]> {
     try {
@@ -202,7 +197,7 @@ class FirestoreService {
         ...doc.data()
       })) as CalendarEvent[];
     } catch (error) {
-      console.error('Erro ao buscar eventos:', error);
+      console.error('❌ Erro ao buscar eventos:', error);
       return [];
     }
   }
@@ -212,14 +207,14 @@ class FirestoreService {
       const eventData = this.addContextFields(event);
       const docRef = await addDoc(this.getCollection('events'), eventData);
       
-      console.log('Evento salvo:', docRef.id, 'Contexto:', this.activeTeamId ? 'Equipe' : 'Solo');
+      console.log('✅ Evento salvo:', docRef.id);
       
       return {
         id: docRef.id,
         ...event
       };
     } catch (error) {
-      console.error('Erro ao salvar evento:', error);
+      console.error('❌ Erro ao salvar evento:', error);
       return null;
     }
   }
@@ -230,12 +225,12 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await updateDoc(docRef, updatedEvent);
-      console.log('Evento atualizado:', id);
+      console.log('✅ Evento atualizado:', id);
       
       const updated = await getDoc(docRef);
       return updated.exists() ? { id: updated.id, ...updated.data() } as CalendarEvent : null;
     } catch (error) {
-      console.error('Erro ao atualizar evento:', error);
+      console.error('❌ Erro ao atualizar evento:', error);
       return null;
     }
   }
@@ -246,17 +241,17 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
-      console.log('Evento excluído:', id);
+      console.log('✅ Evento excluído:', id);
       return true;
     } catch (error) {
-      console.error('Erro ao excluir evento:', error);
+      console.error('❌ Erro ao excluir evento:', error);
       return false;
     }
   }
 
-  /**
-   * RECEITAS - Métodos CRUD
-   */
+  // ==========================================
+  // RECEITAS (mesmo padrão)
+  // ==========================================
   
   async getRevenues(): Promise<Revenue[]> {
     try {
@@ -270,7 +265,7 @@ class FirestoreService {
         ...doc.data()
       })) as Revenue[];
     } catch (error) {
-      console.error('Erro ao buscar receitas:', error);
+      console.error('❌ Erro ao buscar receitas:', error);
       return [];
     }
   }
@@ -280,14 +275,14 @@ class FirestoreService {
       const revenueData = this.addContextFields(revenue);
       const docRef = await addDoc(this.getCollection('revenues'), revenueData);
       
-      console.log('Receita salva:', docRef.id);
+      console.log('✅ Receita salva:', docRef.id);
       
       return {
         id: docRef.id,
         ...revenue
       };
     } catch (error) {
-      console.error('Erro ao salvar receita:', error);
+      console.error('❌ Erro ao salvar receita:', error);
       return null;
     }
   }
@@ -298,12 +293,12 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await updateDoc(docRef, updatedRevenue);
-      console.log('Receita atualizada:', id);
+      console.log('✅ Receita atualizada:', id);
       
       const updated = await getDoc(docRef);
       return updated.exists() ? { id: updated.id, ...updated.data() } as Revenue : null;
     } catch (error) {
-      console.error('Erro ao atualizar receita:', error);
+      console.error('❌ Erro ao atualizar receita:', error);
       return null;
     }
   }
@@ -314,17 +309,17 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
-      console.log('Receita excluída:', id);
+      console.log('✅ Receita excluída:', id);
       return true;
     } catch (error) {
-      console.error('Erro ao excluir receita:', error);
+      console.error('❌ Erro ao excluir receita:', error);
       return false;
     }
   }
 
-  /**
-   * DESPESAS - Métodos CRUD
-   */
+  // ==========================================
+  // DESPESAS (mesmo padrão)
+  // ==========================================
   
   async getExpenses(): Promise<Expense[]> {
     try {
@@ -338,7 +333,7 @@ class FirestoreService {
         ...doc.data()
       })) as Expense[];
     } catch (error) {
-      console.error('Erro ao buscar despesas:', error);
+      console.error('❌ Erro ao buscar despesas:', error);
       return [];
     }
   }
@@ -348,14 +343,14 @@ class FirestoreService {
       const expenseData = this.addContextFields(expense);
       const docRef = await addDoc(this.getCollection('expenses'), expenseData);
       
-      console.log('Despesa salva:', docRef.id);
+      console.log('✅ Despesa salva:', docRef.id);
       
       return {
         id: docRef.id,
         ...expense
       };
     } catch (error) {
-      console.error('Erro ao salvar despesa:', error);
+      console.error('❌ Erro ao salvar despesa:', error);
       return null;
     }
   }
@@ -366,12 +361,12 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await updateDoc(docRef, updatedExpense);
-      console.log('Despesa atualizada:', id);
+      console.log('✅ Despesa atualizada:', id);
       
       const updated = await getDoc(docRef);
       return updated.exists() ? { id: updated.id, ...updated.data() } as Expense : null;
     } catch (error) {
-      console.error('Erro ao atualizar despesa:', error);
+      console.error('❌ Erro ao atualizar despesa:', error);
       return null;
     }
   }
@@ -382,18 +377,19 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
-      console.log('Despesa excluída:', id);
+      console.log('✅ Despesa excluída:', id);
       return true;
     } catch (error) {
-      console.error('Erro ao excluir despesa:', error);
+      console.error('❌ Erro ao excluir despesa:', error);
       return false;
     }
   }
 
-  /**
-   * DOCUMENTOS - Métodos CRUD
-   */
-  
+  // ==========================================
+  // DOCUMENTOS, ADVOGADOS, COLABORADORES
+  // (Mesma implementação com getCollection)
+  // ==========================================
+
   async getDocuments(): Promise<Document[]> {
     try {
       const snapshot = await getDocs(query(
@@ -407,7 +403,7 @@ class FirestoreService {
         createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || doc.data().createdAt
       })) as Document[];
     } catch (error) {
-      console.error('Erro ao buscar documentos:', error);
+      console.error('❌ Erro ao buscar documentos:', error);
       return [];
     }
   }
@@ -417,7 +413,7 @@ class FirestoreService {
       const documentData = this.addContextFields(document);
       const docRef = await addDoc(this.getCollection('documents'), documentData);
       
-      console.log('Documento salvo:', docRef.id);
+      console.log('✅ Documento salvo:', docRef.id);
       
       return {
         id: docRef.id,
@@ -425,7 +421,7 @@ class FirestoreService {
         createdAt: new Date().toISOString()
       };
     } catch (error) {
-      console.error('Erro ao salvar documento:', error);
+      console.error('❌ Erro ao salvar documento:', error);
       return null;
     }
   }
@@ -436,18 +432,14 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
-      console.log('Documento excluído:', id);
+      console.log('✅ Documento excluído:', id);
       return true;
     } catch (error) {
-      console.error('Erro ao excluir documento:', error);
+      console.error('❌ Erro ao excluir documento:', error);
       return false;
     }
   }
 
-  /**
-   * ADVOGADOS - Métodos CRUD
-   */
-  
   async getLawyers(): Promise<Lawyer[]> {
     try {
       const snapshot = await getDocs(query(
@@ -461,7 +453,7 @@ class FirestoreService {
         createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || doc.data().createdAt
       })) as Lawyer[];
     } catch (error) {
-      console.error('Erro ao buscar advogados:', error);
+      console.error('❌ Erro ao buscar advogados:', error);
       return [];
     }
   }
@@ -471,7 +463,7 @@ class FirestoreService {
       const lawyerData = this.addContextFields(lawyer);
       const docRef = await addDoc(this.getCollection('lawyers'), lawyerData);
       
-      console.log('Advogado salvo:', docRef.id);
+      console.log('✅ Advogado salvo:', docRef.id);
       
       return {
         id: docRef.id,
@@ -479,7 +471,7 @@ class FirestoreService {
         createdAt: new Date().toISOString()
       };
     } catch (error) {
-      console.error('Erro ao salvar advogado:', error);
+      console.error('❌ Erro ao salvar advogado:', error);
       return null;
     }
   }
@@ -490,7 +482,7 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await updateDoc(docRef, updatedLawyer);
-      console.log('Advogado atualizado:', id);
+      console.log('✅ Advogado atualizado:', id);
       
       const updated = await getDoc(docRef);
       return updated.exists() ? { 
@@ -499,7 +491,7 @@ class FirestoreService {
         createdAt: updated.data().createdAt?.toDate?.()?.toISOString() || updated.data().createdAt
       } as Lawyer : null;
     } catch (error) {
-      console.error('Erro ao atualizar advogado:', error);
+      console.error('❌ Erro ao atualizar advogado:', error);
       return null;
     }
   }
@@ -510,18 +502,14 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
-      console.log('Advogado excluído:', id);
+      console.log('✅ Advogado excluído:', id);
       return true;
     } catch (error) {
-      console.error('Erro ao excluir advogado:', error);
+      console.error('❌ Erro ao excluir advogado:', error);
       return false;
     }
   }
 
-  /**
-   * COLABORADORES - Métodos CRUD
-   */
-  
   async getEmployees(): Promise<Employee[]> {
     try {
       const snapshot = await getDocs(query(
@@ -535,7 +523,7 @@ class FirestoreService {
         createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || doc.data().createdAt
       })) as Employee[];
     } catch (error) {
-      console.error('Erro ao buscar colaboradores:', error);
+      console.error('❌ Erro ao buscar colaboradores:', error);
       return [];
     }
   }
@@ -545,7 +533,7 @@ class FirestoreService {
       const employeeData = this.addContextFields(employee);
       const docRef = await addDoc(this.getCollection('employees'), employeeData);
       
-      console.log('Colaborador salvo:', docRef.id);
+      console.log('✅ Colaborador salvo:', docRef.id);
       
       return {
         id: docRef.id,
@@ -553,7 +541,7 @@ class FirestoreService {
         createdAt: new Date().toISOString()
       };
     } catch (error) {
-      console.error('Erro ao salvar colaborador:', error);
+      console.error('❌ Erro ao salvar colaborador:', error);
       return null;
     }
   }
@@ -564,7 +552,7 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await updateDoc(docRef, updatedEmployee);
-      console.log('Colaborador atualizado:', id);
+      console.log('✅ Colaborador atualizado:', id);
       
       const updated = await getDoc(docRef);
       return updated.exists() ? { 
@@ -573,7 +561,7 @@ class FirestoreService {
         createdAt: updated.data().createdAt?.toDate?.()?.toISOString() || updated.data().createdAt
       } as Employee : null;
     } catch (error) {
-      console.error('Erro ao atualizar colaborador:', error);
+      console.error('❌ Erro ao atualizar colaborador:', error);
       return null;
     }
   }
@@ -584,17 +572,17 @@ class FirestoreService {
       const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
-      console.log('Colaborador excluído:', id);
+      console.log('✅ Colaborador excluído:', id);
       return true;
     } catch (error) {
-      console.error('Erro ao excluir colaborador:', error);
+      console.error('❌ Erro ao excluir colaborador:', error);
       return false;
     }
   }
 
-  /**
-   * MÉTODOS DE ESTATÍSTICAS
-   */
+  // ==========================================
+  // ESTATÍSTICAS (Adaptado para contexto)
+  // ==========================================
   
   async getFinancialSummary() {
     try {
@@ -616,7 +604,7 @@ class FirestoreService {
         monthlyData
       };
     } catch (error) {
-      console.error('Erro ao calcular resumo financeiro:', error);
+      console.error('❌ Erro ao calcular resumo financeiro:', error);
       return {
         totalRevenue: 0,
         totalExpenses: 0,
@@ -675,7 +663,7 @@ class FirestoreService {
         activeEmployees: employees.filter(e => e.status === 'Ativo').length
       };
     } catch (error) {
-      console.error('Erro ao calcular estatísticas:', error);
+      console.error('❌ Erro ao calcular estatísticas:', error);
       return {
         totalProcesses: 0,
         activeProcesses: 0,
