@@ -1,8 +1,10 @@
+// src/components/Processes/ProcessForm.tsx
 import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import { Process, Lawyer } from '../../types';
+import { usePermissionCheck } from '../Common/withPermission';
 import { ArrowLeftIcon, PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { firestoreService } from '../../services/firestoreService';
 
@@ -31,6 +33,10 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
   const [lawyers, setLawyers] = useState<Lawyer[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingLawyers, setLoadingLawyers] = useState(true);
+  
+  // NOVO: Permission checks
+  const { hasPermission } = usePermissionCheck();
+  const canEdit = hasPermission('processos');
   
   const {
     register,
@@ -71,6 +77,8 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
   };
 
   const handleLawyerToggle = (lawyerName: string) => {
+    if (!canEdit) return;
+    
     setSelectedLawyers(prev => {
       if (prev.includes(lawyerName)) {
         return prev.filter(name => name !== lawyerName);
@@ -80,8 +88,25 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
     });
   };
 
+  const addAttachment = () => {
+    if (!canEdit) {
+      alert('Você não possui permissão para adicionar anexos.');
+      return;
+    }
+    
+    const fileName = prompt('Nome do arquivo anexado:');
+    if (fileName && fileName.trim()) {
+      setAttachments([...attachments, fileName.trim()]);
+    }
+  };
+
+  const removeAttachment = (index: number) => {
+    if (!canEdit) return;
+    setAttachments(attachments.filter((_, i) => i !== index));
+  };
+
   const onSubmit = async (data: Partial<Process>) => {
-    if (loading) return;
+    if (loading || !canEdit) return;
     
     try {
       setLoading(true);
@@ -119,16 +144,27 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
     }
   };
 
-  const addAttachment = () => {
-    const fileName = prompt('Nome do arquivo anexado:');
-    if (fileName && fileName.trim()) {
-      setAttachments([...attachments, fileName.trim()]);
-    }
-  };
-
-  const removeAttachment = (index: number) => {
-    setAttachments(attachments.filter((_, i) => i !== index));
-  };
+  // GUARD: Mensagem se não tiver permissão
+  if (!canEdit && !loadingLawyers) {
+    return (
+      <div className="p-6">
+        <div className="max-w-2xl mx-auto">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center">
+            <h3 className="text-lg font-semibold text-amber-800 mb-2">Sem Permissão</h3>
+            <p className="text-amber-700 mb-4">
+              Você não possui permissão para {process ? 'editar' : 'criar'} processos.
+            </p>
+            <button
+              onClick={onBack}
+              className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+            >
+              Voltar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -166,9 +202,9 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                 <input
                   {...register('name')}
                   type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="Ex: Execução Fiscal – José Santos"
-                  disabled={loading}
+                  disabled={loading || !canEdit}
                 />
                 {errors.name && (
                   <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>
@@ -182,9 +218,9 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                 <input
                   {...register('processNumber')}
                   type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="0001234-56.2023.8.02.0001"
-                  disabled={loading}
+                  disabled={loading || !canEdit}
                 />
                 {errors.processNumber && (
                   <p className="text-red-500 text-sm mt-1">{errors.processNumber.message}</p>
@@ -198,9 +234,9 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                 <input
                   {...register('client')}
                   type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="Nome do cliente"
-                  disabled={loading}
+                  disabled={loading || !canEdit}
                 />
                 {errors.client && (
                   <p className="text-red-500 text-sm mt-1">{errors.client.message}</p>
@@ -214,9 +250,9 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                 <input
                   {...register('opposingParty')}
                   type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="Nome da parte contrária"
-                  disabled={loading}
+                  disabled={loading || !canEdit}
                 />
               </div>
 
@@ -227,9 +263,9 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                 <input
                   {...register('court')}
                   type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="Comarca de São Paulo - 1ª Vara Cível"
-                  disabled={loading}
+                  disabled={loading || !canEdit}
                 />
                 {errors.court && (
                   <p className="text-red-500 text-sm mt-1">{errors.court.message}</p>
@@ -251,8 +287,8 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                             type="checkbox"
                             checked={selectedLawyers.includes(lawyer.fullName)}
                             onChange={() => handleLawyerToggle(lawyer.fullName)}
-                            className="mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                            disabled={loading}
+                            className="mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded disabled:opacity-50"
+                            disabled={loading || !canEdit}
                           />
                           <span className="text-sm text-gray-700">
                             {lawyer.fullName} - OAB: {lawyer.oab}
@@ -278,7 +314,7 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                             type="button"
                             onClick={() => handleLawyerToggle(lawyer)}
                             className="ml-1 text-blue-600 hover:text-blue-800"
-                            disabled={loading}
+                            disabled={loading || !canEdit}
                           >
                             <XMarkIcon className="w-3 h-3" />
                           </button>
@@ -288,12 +324,7 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                   </div>
                 )}
                 {selectedLawyers.length === 0 && (
-                  <p className="text-red-500 text-sm mt-1">Pelo menos um advogado responsável é obrigatório</p>
-                )}
-                {lawyers.length === 0 && !loadingLawyers && (
-                  <p className="text-amber-600 text-sm mt-1">
-                    Nenhum advogado ativo encontrado. Cadastre advogados na aba "Advogados".
-                  </p>
+                  <p className="text-red-500 text-sm mt-1">Pelo menos um advogado é obrigatório</p>
                 )}
               </div>
 
@@ -304,8 +335,8 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                 <input
                   {...register('startDate')}
                   type="date"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={loading}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  disabled={loading || !canEdit}
                 />
                 {errors.startDate && (
                   <p className="text-red-500 text-sm mt-1">{errors.startDate.message}</p>
@@ -318,8 +349,8 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                 </label>
                 <select
                   {...register('status')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={loading}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  disabled={loading || !canEdit}
                 >
                   <option value="Em andamento">Em andamento</option>
                   <option value="Concluído">Concluído</option>
@@ -342,9 +373,9 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                 <textarea
                   {...register('description')}
                   rows={4}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="Descreva os detalhes principais do caso..."
-                  disabled={loading}
+                  disabled={loading || !canEdit}
                 />
                 {errors.description && (
                   <p className="text-red-500 text-sm mt-1">{errors.description.message}</p>
@@ -358,9 +389,9 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                 <textarea
                   {...register('notes')}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="Observações adicionais..."
-                  disabled={loading}
+                  disabled={loading || !canEdit}
                 />
               </div>
             </div>
@@ -373,8 +404,13 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
               <button
                 type="button"
                 onClick={addAttachment}
-                className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                disabled={loading}
+                disabled={loading || !canEdit}
+                className={`flex items-center px-3 py-2 text-sm rounded-lg transition-colors ${
+                  canEdit && !loading
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
+                title={!canEdit ? 'Sem permissão para adicionar anexos' : 'Adicionar anexo'}
               >
                 <PlusIcon className="w-4 h-4 mr-2" />
                 Adicionar Anexo
@@ -389,8 +425,12 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
                     <button
                       type="button"
                       onClick={() => removeAttachment(index)}
-                      className="text-red-600 hover:text-red-800 disabled:opacity-50"
-                      disabled={loading}
+                      disabled={loading || !canEdit}
+                      className={`p-2 rounded ${
+                        canEdit && !loading
+                          ? 'text-red-600 hover:text-red-800 hover:bg-red-50'
+                          : 'text-gray-300 cursor-not-allowed'
+                      }`}
                     >
                       <XMarkIcon className="w-4 h-4" />
                     </button>
@@ -407,15 +447,20 @@ export default function ProcessForm({ process, onBack, onSave }: ProcessFormProp
             <button
               type="button"
               onClick={onBack}
-              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
               disabled={loading}
+              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-              disabled={loading}
+              disabled={loading || !canEdit}
+              className={`px-6 py-2 rounded-lg transition-colors ${
+                canEdit && !loading
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+              title={!canEdit ? 'Sem permissão para salvar' : 'Salvar processo'}
             >
               {loading ? 'Salvando...' : (process ? 'Atualizar' : 'Salvar')} Processo
             </button>

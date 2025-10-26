@@ -1,12 +1,15 @@
+// src/components/Admin/AccessTab.tsx
 import React, { useState, useEffect } from 'react';
 import { Team, TeamMember, TeamPermissions, TeamRole, DEFAULT_PERMISSIONS } from '../../types/admin';
 import { adminService } from '../../services/adminService';
+import { useTeam } from '../../contexts/TeamContext';
 import { 
   UserIcon, 
   ShieldCheckIcon, 
   PencilIcon, 
   TrashIcon,
-  UserGroupIcon
+  UserGroupIcon,
+  LockClosedIcon
 } from '@heroicons/react/24/outline';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -22,6 +25,10 @@ export default function AccessTab({ team }: AccessTabProps) {
   const [editRole, setEditRole] = useState<TeamRole>('viewer');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // NOVO: Verificar permissões
+  const { isOwner, isSoloMode } = useTeam();
+  const canManageAccess = isSoloMode || isOwner; // Só owner pode gerenciar acessos
 
   useEffect(() => {
     if (team) {
@@ -44,13 +51,18 @@ export default function AccessTab({ team }: AccessTabProps) {
   };
 
   const handleEditMember = (member: TeamMember) => {
+    if (!canManageAccess) {
+      alert('Apenas o proprietário pode editar permissões.');
+      return;
+    }
+    
     setEditingMember(member);
     setEditPermissions(member.permissions);
     setEditRole(member.role);
   };
 
   const handleSavePermissions = async () => {
-    if (!editingMember || !editPermissions || !team) return;
+    if (!editingMember || !editPermissions || !team || !canManageAccess) return;
     
     try {
       setSaving(true);
@@ -79,6 +91,11 @@ export default function AccessTab({ team }: AccessTabProps) {
   };
 
   const handleRemoveMember = async (member: TeamMember) => {
+    if (!canManageAccess) {
+      alert('Apenas o proprietário pode remover membros.');
+      return;
+    }
+    
     if (member.role === 'owner') {
       alert('Não é possível remover o proprietário da equipe.');
       return;
@@ -98,7 +115,7 @@ export default function AccessTab({ team }: AccessTabProps) {
   };
 
   const updatePermission = (module: keyof TeamPermissions, value: boolean) => {
-    if (!editPermissions) return;
+    if (!editPermissions || !canManageAccess) return;
     
     setEditPermissions({
       ...editPermissions,
@@ -107,6 +124,8 @@ export default function AccessTab({ team }: AccessTabProps) {
   };
 
   const handleRoleChange = (newRole: TeamRole) => {
+    if (!canManageAccess) return;
+    
     setEditRole(newRole);
     setEditPermissions(DEFAULT_PERMISSIONS[newRole]);
   };
@@ -140,6 +159,29 @@ export default function AccessTab({ team }: AccessTabProps) {
   const formatDate = (dateString: string) => {
     return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
   };
+
+  // GUARD: Modo visualização se não puder gerenciar
+  if (!canManageAccess && !loading) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <div className="flex items-center">
+            <LockClosedIcon className="w-5 h-5 text-amber-600 mr-2" />
+            <p className="text-sm text-amber-800">
+              Apenas o proprietário da equipe pode gerenciar acessos e permissões.
+            </p>
+          </div>
+        </div>
+        
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Membros da Equipe</h3>
+          <p className="text-gray-600">
+            {members.length} membro(s) na equipe
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -190,11 +232,17 @@ export default function AccessTab({ team }: AccessTabProps) {
               </div>
 
               <div className="flex items-center space-x-2">
-                {member.role !== 'owner' && (
+                {member.role !== 'owner' && canManageAccess && (
                   <>
                     <button
                       onClick={() => handleEditMember(member)}
-                      className="flex items-center px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                      disabled={!canManageAccess}
+                      className={`flex items-center px-3 py-1 text-xs rounded-lg transition-colors ${
+                        canManageAccess
+                          ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }`}
+                      title={!canManageAccess ? 'Sem permissão' : 'Editar'}
                     >
                       <PencilIcon className="w-3 h-3 mr-1" />
                       Editar
@@ -202,7 +250,13 @@ export default function AccessTab({ team }: AccessTabProps) {
                     
                     <button
                       onClick={() => handleRemoveMember(member)}
-                      className="flex items-center px-3 py-1 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                      disabled={!canManageAccess}
+                      className={`flex items-center px-3 py-1 text-xs rounded-lg transition-colors ${
+                        canManageAccess
+                          ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }`}
+                      title={!canManageAccess ? 'Sem permissão' : 'Remover'}
                     >
                       <TrashIcon className="w-3 h-3 mr-1" />
                       Remover
@@ -235,7 +289,7 @@ export default function AccessTab({ team }: AccessTabProps) {
       </div>
 
       {/* Edit Permissions Modal */}
-      {editingMember && editPermissions && (
+      {editingMember && editPermissions && canManageAccess && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
             <div className="p-6">

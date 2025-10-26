@@ -1,5 +1,7 @@
+// src/components/Processes/ProcessView.tsx
 import React, { useState } from 'react';
 import { Process } from '../../types';
+import { usePermissionCheck } from '../Common/withPermission';
 import { ArrowLeftIcon, PencilIcon, DocumentIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -14,12 +16,21 @@ interface ProcessViewProps {
 
 export default function ProcessView({ process, onBack, onEdit, onUpdate }: ProcessViewProps) {
   const [loading, setLoading] = useState(false);
+  
+  // NOVO: Permission checks
+  const { hasPermission } = usePermissionCheck();
+  const canEdit = hasPermission('processos');
 
   const formatDate = (dateString: string) => {
     return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
   };
 
   const handleMarkAsCompleted = async () => {
+    if (!canEdit) {
+      alert('Você não possui permissão para atualizar processos.');
+      return;
+    }
+    
     if (confirm('Tem certeza que deseja marcar este processo como concluído?')) {
       try {
         setLoading(true);
@@ -37,6 +48,14 @@ export default function ProcessView({ process, onBack, onEdit, onUpdate }: Proce
         setLoading(false);
       }
     }
+  };
+
+  const handleEdit = () => {
+    if (!canEdit) {
+      alert('Você não possui permissão para editar processos.');
+      return;
+    }
+    onEdit();
   };
 
   return (
@@ -61,17 +80,27 @@ export default function ProcessView({ process, onBack, onEdit, onUpdate }: Proce
           {process.status === 'Em andamento' && (
             <button
               onClick={handleMarkAsCompleted}
-              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-              disabled={loading}
+              disabled={loading || !canEdit}
+              className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+                canEdit
+                  ? 'bg-green-600 text-white hover:bg-green-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+              title={!canEdit ? 'Sem permissão para atualizar' : 'Marcar como concluído'}
             >
               <CheckCircleIcon className="w-5 h-5 mr-2" />
               {loading ? 'Atualizando...' : 'Marcar como Concluído'}
             </button>
           )}
           <button
-            onClick={onEdit}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            disabled={loading}
+            onClick={handleEdit}
+            disabled={!canEdit}
+            className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+              canEdit
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+            title={!canEdit ? 'Sem permissão para editar' : 'Editar processo'}
           >
             <PencilIcon className="w-5 h-5 mr-2" />
             Editar
