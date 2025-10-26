@@ -1,6 +1,9 @@
+// src/components/Processes/ProcessList.tsx - COM GUARDS
 import React, { useState, useEffect } from 'react';
 import { Process } from '../../types';
 import { firestoreService } from '../../services/firestoreService';
+import { withPermission, usePermissionCheck } from '../Common/withPermission'; // IMPORT
+import { useTeam } from '../../contexts/TeamContext'; // IMPORT
 import { 
   MagnifyingGlassIcon, 
   FunnelIcon,
@@ -18,11 +21,19 @@ interface ProcessListProps {
   onEditProcess: (process: Process) => void;
 }
 
-export default function ProcessList({ onNewProcess, onViewProcess, onEditProcess }: ProcessListProps) {
+function ProcessList({ onNewProcess, onViewProcess, onEditProcess }: ProcessListProps) {
   const [processes, setProcesses] = useState<Process[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
+  
+  // NOVO: Hooks de permissão
+  const { hasPermission } = usePermissionCheck();
+  const { isSoloMode, activeTeam } = useTeam();
+  
+  const canCreate = hasPermission('processos');
+  const canEdit = hasPermission('processos');
+  const canDelete = hasPermission('processos');
 
   useEffect(() => {
     loadProcesses();
@@ -43,11 +54,16 @@ export default function ProcessList({ onNewProcess, onViewProcess, onEditProcess
   };
 
   const handleDeleteProcess = async (id: string) => {
+    if (!canDelete) {
+      alert('Você não possui permissão para excluir processos.');
+      return;
+    }
+    
     if (confirm('Tem certeza que deseja excluir este processo?')) {
       try {
         const success = await firestoreService.deleteProcess(id);
         if (success) {
-          await loadProcesses(); // Recarregar lista
+          await loadProcesses();
         }
       } catch (error) {
         console.error('Erro ao excluir processo:', error);
@@ -77,15 +93,36 @@ export default function ProcessList({ onNewProcess, onViewProcess, onEditProcess
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Processos Jurídicos</h1>
           <p className="text-gray-600">Gerencie todos os processos do escritório</p>
+          {/* NOVO: Indicador de contexto */}
+          {!isSoloMode && activeTeam && (
+            <p className="text-xs text-blue-600 mt-1">
+              📁 Visualizando processos da equipe: {activeTeam.name}
+            </p>
+          )}
         </div>
         <button
           onClick={onNewProcess}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          disabled={!canCreate}
+          className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+            canCreate
+              ? 'bg-blue-600 text-white hover:bg-blue-700'
+              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+          }`}
+          title={!canCreate ? 'Sem permissão para criar processos' : 'Criar novo processo'}
         >
           <PlusIcon className="w-5 h-5 mr-2" />
           Novo Processo
         </button>
       </div>
+
+      {/* NOVO: Mensagem de permissão */}
+      {!canCreate && !isSoloMode && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <p className="text-sm text-amber-800">
+            ⚠️ Você possui acesso somente leitura. Não é possível criar ou editar processos.
+          </p>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
@@ -183,6 +220,7 @@ export default function ProcessList({ onNewProcess, onViewProcess, onEditProcess
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex items-center justify-end space-x-2">
+                      {/* Visualizar sempre permitido */}
                       <button
                         onClick={() => onViewProcess(process)}
                         className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
@@ -190,17 +228,31 @@ export default function ProcessList({ onNewProcess, onViewProcess, onEditProcess
                       >
                         <EyeIcon className="w-4 h-4" />
                       </button>
+                      
+                      {/* NOVO: Editar com guard */}
                       <button
-                        onClick={() => onEditProcess(process)}
-                        className="text-amber-600 hover:text-amber-900 p-1 rounded hover:bg-amber-50"
-                        title="Editar"
+                        onClick={() => canEdit && onEditProcess(process)}
+                        disabled={!canEdit}
+                        className={`p-1 rounded ${
+                          canEdit
+                            ? 'text-amber-600 hover:text-amber-900 hover:bg-amber-50'
+                            : 'text-gray-300 cursor-not-allowed'
+                        }`}
+                        title={!canEdit ? 'Sem permissão para editar' : 'Editar'}
                       >
                         <PencilIcon className="w-4 h-4" />
                       </button>
+                      
+                      {/* NOVO: Excluir com guard */}
                       <button
                         onClick={() => handleDeleteProcess(process.id)}
-                        className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-50"
-                        title="Excluir"
+                        disabled={!canDelete}
+                        className={`p-1 rounded ${
+                          canDelete
+                            ? 'text-red-600 hover:text-red-900 hover:bg-red-50'
+                            : 'text-gray-300 cursor-not-allowed'
+                        }`}
+                        title={!canDelete ? 'Sem permissão para excluir' : 'Excluir'}
                       >
                         <TrashIcon className="w-4 h-4" />
                       </button>
@@ -220,7 +272,9 @@ export default function ProcessList({ onNewProcess, onViewProcess, onEditProcess
           <div className="text-center py-12">
             <p className="text-gray-500">
               {processes.length === 0 
-                ? 'Nenhum processo cadastrado. Clique em "Novo Processo" para começar.' 
+                ? canCreate 
+                  ? 'Nenhum processo cadastrado. Clique em "Novo Processo" para começar.' 
+                  : 'Nenhum processo cadastrado ainda.'
                 : 'Nenhum processo encontrado com os filtros aplicados.'
               }
             </p>
@@ -230,3 +284,8 @@ export default function ProcessList({ onNewProcess, onViewProcess, onEditProcess
     </div>
   );
 }
+
+// EXPORTAR COM GUARD
+export default withPermission(ProcessList, 'processos', 'any', {
+  showMessage: true
+});
