@@ -1,8 +1,9 @@
 /**
- * Serviço de Firestore para LegalX
+ * Serviço de Firestore ATUALIZADO com suporte a Equipes
  * 
- * Este serviço gerencia toda a persistência de dados no Firestore com isolamento por usuário.
- * Cada usuário terá uma subcoleção própria para seus dados.
+ * Este serviço gerencia persistência com isolamento por usuário OU por equipe.
+ * Quando há uma equipe ativa, salva em /teams/{teamId}/subcoleções
+ * Quando em modo solo, salva em /userData/{userId}/subcoleções
  */
 
 import {
@@ -16,13 +17,31 @@ import {
   query,
   where,
   orderBy,
-  onSnapshot,
-  Timestamp
+  Timestamp,
+  writeBatch
 } from 'firebase/firestore';
 import { auth, db } from '../firebase.config';
 import { Process, CalendarEvent, Revenue, Expense, Document, Lawyer, Employee } from '../types';
 
 class FirestoreService {
+  
+  // NOVO: Contexto de equipe ativa
+  private activeTeamId: string | null = null;
+  
+  /**
+   * NOVO: Definir equipe ativa
+   */
+  setActiveTeam(teamId: string | null) {
+    this.activeTeamId = teamId;
+    console.log('Equipe ativa alterada:', teamId || 'Modo Solo');
+  }
+  
+  /**
+   * NOVO: Obter equipe ativa
+   */
+  getActiveTeam(): string | null {
+    return this.activeTeamId;
+  }
   
   /**
    * Obter o ID do usuário atual
@@ -36,11 +55,41 @@ class FirestoreService {
   }
 
   /**
-   * Obter referência da coleção do usuário
+   * NOVO: Obter referência da coleção baseado no contexto
+   * Se há equipe ativa: /teams/{teamId}/{collection}
+   * Se modo solo: /userData/{userId}/{collection}
    */
-  private getUserCollection(collectionName: string) {
+  private getCollection(collectionName: string) {
+    if (this.activeTeamId) {
+      // Modo Equipe: dados compartilhados
+      return collection(db, 'teams', this.activeTeamId, collectionName);
+    } else {
+      // Modo Solo: dados pessoais
+      const userId = this.getCurrentUserId();
+      return collection(db, 'userData', userId, collectionName);
+    }
+  }
+  
+  /**
+   * NOVO: Adicionar campos de contexto aos dados
+   */
+  private addContextFields(data: any): any {
     const userId = this.getCurrentUserId();
-    return collection(db, 'userData', userId, collectionName);
+    
+    if (this.activeTeamId) {
+      return {
+        ...data,
+        userId,
+        teamId: this.activeTeamId,
+        createdAt: Timestamp.now()
+      };
+    } else {
+      return {
+        ...data,
+        userId,
+        createdAt: Timestamp.now()
+      };
+    }
   }
 
   /**
@@ -50,7 +99,7 @@ class FirestoreService {
   async getProcesses(): Promise<Process[]> {
     try {
       const snapshot = await getDocs(query(
-        this.getUserCollection('processes'),
+        this.getCollection('processes'),
         orderBy('createdAt', 'desc')
       ));
       
@@ -67,8 +116,8 @@ class FirestoreService {
 
   async getProcessById(id: string): Promise<Process | null> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'processes', id);
+      const collectionRef = this.getCollection('processes');
+      const docRef = doc(collectionRef as any, id);
       const snapshot = await getDoc(docRef);
       
       if (snapshot.exists()) {
@@ -89,13 +138,10 @@ class FirestoreService {
 
   async saveProcess(process: Omit<Process, 'id' | 'createdAt'>): Promise<Process | null> {
     try {
-      const processData = {
-        ...process,
-        createdAt: Timestamp.now()
-      };
-
-      const docRef = await addDoc(this.getUserCollection('processes'), processData);
-      console.log('Processo salvo no Firestore:', docRef.id);
+      const processData = this.addContextFields(process);
+      const docRef = await addDoc(this.getCollection('processes'), processData);
+      
+      console.log('Processo salvo:', docRef.id, 'Contexto:', this.activeTeamId ? 'Equipe' : 'Solo');
       
       return {
         id: docRef.id,
@@ -110,8 +156,8 @@ class FirestoreService {
 
   async updateProcess(id: string, updatedProcess: Partial<Process>): Promise<Process | null> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'processes', id);
+      const collectionRef = this.getCollection('processes');
+      const docRef = doc(collectionRef as any, id);
       
       await updateDoc(docRef, {
         ...updatedProcess,
@@ -128,8 +174,8 @@ class FirestoreService {
 
   async deleteProcess(id: string): Promise<boolean> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'processes', id);
+      const collectionRef = this.getCollection('processes');
+      const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
       console.log('Processo excluído:', id);
@@ -141,13 +187,13 @@ class FirestoreService {
   }
 
   /**
-   * EVENTOS - Métodos CRUD
+   * EVENTOS - Métodos CRUD (seguem o mesmo padrão)
    */
   
   async getEvents(): Promise<CalendarEvent[]> {
     try {
       const snapshot = await getDocs(query(
-        this.getUserCollection('events'),
+        this.getCollection('events'),
         orderBy('date', 'desc')
       ));
       
@@ -163,8 +209,10 @@ class FirestoreService {
 
   async saveEvent(event: Omit<CalendarEvent, 'id'>): Promise<CalendarEvent | null> {
     try {
-      const docRef = await addDoc(this.getUserCollection('events'), event);
-      console.log('Evento salvo no Firestore:', docRef.id);
+      const eventData = this.addContextFields(event);
+      const docRef = await addDoc(this.getCollection('events'), eventData);
+      
+      console.log('Evento salvo:', docRef.id, 'Contexto:', this.activeTeamId ? 'Equipe' : 'Solo');
       
       return {
         id: docRef.id,
@@ -178,8 +226,8 @@ class FirestoreService {
 
   async updateEvent(id: string, updatedEvent: Partial<CalendarEvent>): Promise<CalendarEvent | null> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'events', id);
+      const collectionRef = this.getCollection('events');
+      const docRef = doc(collectionRef as any, id);
       
       await updateDoc(docRef, updatedEvent);
       console.log('Evento atualizado:', id);
@@ -194,8 +242,8 @@ class FirestoreService {
 
   async deleteEvent(id: string): Promise<boolean> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'events', id);
+      const collectionRef = this.getCollection('events');
+      const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
       console.log('Evento excluído:', id);
@@ -213,7 +261,7 @@ class FirestoreService {
   async getRevenues(): Promise<Revenue[]> {
     try {
       const snapshot = await getDocs(query(
-        this.getUserCollection('revenues'),
+        this.getCollection('revenues'),
         orderBy('date', 'desc')
       ));
       
@@ -229,8 +277,10 @@ class FirestoreService {
 
   async saveRevenue(revenue: Omit<Revenue, 'id'>): Promise<Revenue | null> {
     try {
-      const docRef = await addDoc(this.getUserCollection('revenues'), revenue);
-      console.log('Receita salva no Firestore:', docRef.id);
+      const revenueData = this.addContextFields(revenue);
+      const docRef = await addDoc(this.getCollection('revenues'), revenueData);
+      
+      console.log('Receita salva:', docRef.id);
       
       return {
         id: docRef.id,
@@ -244,8 +294,8 @@ class FirestoreService {
 
   async updateRevenue(id: string, updatedRevenue: Partial<Revenue>): Promise<Revenue | null> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'revenues', id);
+      const collectionRef = this.getCollection('revenues');
+      const docRef = doc(collectionRef as any, id);
       
       await updateDoc(docRef, updatedRevenue);
       console.log('Receita atualizada:', id);
@@ -260,8 +310,8 @@ class FirestoreService {
 
   async deleteRevenue(id: string): Promise<boolean> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'revenues', id);
+      const collectionRef = this.getCollection('revenues');
+      const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
       console.log('Receita excluída:', id);
@@ -279,7 +329,7 @@ class FirestoreService {
   async getExpenses(): Promise<Expense[]> {
     try {
       const snapshot = await getDocs(query(
-        this.getUserCollection('expenses'),
+        this.getCollection('expenses'),
         orderBy('date', 'desc')
       ));
       
@@ -295,8 +345,10 @@ class FirestoreService {
 
   async saveExpense(expense: Omit<Expense, 'id'>): Promise<Expense | null> {
     try {
-      const docRef = await addDoc(this.getUserCollection('expenses'), expense);
-      console.log('Despesa salva no Firestore:', docRef.id);
+      const expenseData = this.addContextFields(expense);
+      const docRef = await addDoc(this.getCollection('expenses'), expenseData);
+      
+      console.log('Despesa salva:', docRef.id);
       
       return {
         id: docRef.id,
@@ -310,8 +362,8 @@ class FirestoreService {
 
   async updateExpense(id: string, updatedExpense: Partial<Expense>): Promise<Expense | null> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'expenses', id);
+      const collectionRef = this.getCollection('expenses');
+      const docRef = doc(collectionRef as any, id);
       
       await updateDoc(docRef, updatedExpense);
       console.log('Despesa atualizada:', id);
@@ -326,8 +378,8 @@ class FirestoreService {
 
   async deleteExpense(id: string): Promise<boolean> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'expenses', id);
+      const collectionRef = this.getCollection('expenses');
+      const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
       console.log('Despesa excluída:', id);
@@ -345,7 +397,7 @@ class FirestoreService {
   async getDocuments(): Promise<Document[]> {
     try {
       const snapshot = await getDocs(query(
-        this.getUserCollection('documents'),
+        this.getCollection('documents'),
         orderBy('createdAt', 'desc')
       ));
       
@@ -362,13 +414,10 @@ class FirestoreService {
 
   async saveDocument(document: Omit<Document, 'id' | 'createdAt'>): Promise<Document | null> {
     try {
-      const documentData = {
-        ...document,
-        createdAt: Timestamp.now()
-      };
-
-      const docRef = await addDoc(this.getUserCollection('documents'), documentData);
-      console.log('Documento salvo no Firestore:', docRef.id);
+      const documentData = this.addContextFields(document);
+      const docRef = await addDoc(this.getCollection('documents'), documentData);
+      
+      console.log('Documento salvo:', docRef.id);
       
       return {
         id: docRef.id,
@@ -383,8 +432,8 @@ class FirestoreService {
 
   async deleteDocument(id: string): Promise<boolean> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'documents', id);
+      const collectionRef = this.getCollection('documents');
+      const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
       console.log('Documento excluído:', id);
@@ -402,7 +451,7 @@ class FirestoreService {
   async getLawyers(): Promise<Lawyer[]> {
     try {
       const snapshot = await getDocs(query(
-        this.getUserCollection('lawyers'),
+        this.getCollection('lawyers'),
         orderBy('fullName', 'asc')
       ));
       
@@ -419,13 +468,10 @@ class FirestoreService {
 
   async saveLawyer(lawyer: Omit<Lawyer, 'id' | 'createdAt'>): Promise<Lawyer | null> {
     try {
-      const lawyerData = {
-        ...lawyer,
-        createdAt: Timestamp.now()
-      };
-
-      const docRef = await addDoc(this.getUserCollection('lawyers'), lawyerData);
-      console.log('Advogado salvo no Firestore:', docRef.id);
+      const lawyerData = this.addContextFields(lawyer);
+      const docRef = await addDoc(this.getCollection('lawyers'), lawyerData);
+      
+      console.log('Advogado salvo:', docRef.id);
       
       return {
         id: docRef.id,
@@ -440,8 +486,8 @@ class FirestoreService {
 
   async updateLawyer(id: string, updatedLawyer: Partial<Lawyer>): Promise<Lawyer | null> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'lawyers', id);
+      const collectionRef = this.getCollection('lawyers');
+      const docRef = doc(collectionRef as any, id);
       
       await updateDoc(docRef, updatedLawyer);
       console.log('Advogado atualizado:', id);
@@ -460,8 +506,8 @@ class FirestoreService {
 
   async deleteLawyer(id: string): Promise<boolean> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'lawyers', id);
+      const collectionRef = this.getCollection('lawyers');
+      const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
       console.log('Advogado excluído:', id);
@@ -479,7 +525,7 @@ class FirestoreService {
   async getEmployees(): Promise<Employee[]> {
     try {
       const snapshot = await getDocs(query(
-        this.getUserCollection('employees'),
+        this.getCollection('employees'),
         orderBy('fullName', 'asc')
       ));
       
@@ -496,13 +542,10 @@ class FirestoreService {
 
   async saveEmployee(employee: Omit<Employee, 'id' | 'createdAt'>): Promise<Employee | null> {
     try {
-      const employeeData = {
-        ...employee,
-        createdAt: Timestamp.now()
-      };
-
-      const docRef = await addDoc(this.getUserCollection('employees'), employeeData);
-      console.log('Colaborador salvo no Firestore:', docRef.id);
+      const employeeData = this.addContextFields(employee);
+      const docRef = await addDoc(this.getCollection('employees'), employeeData);
+      
+      console.log('Colaborador salvo:', docRef.id);
       
       return {
         id: docRef.id,
@@ -517,8 +560,8 @@ class FirestoreService {
 
   async updateEmployee(id: string, updatedEmployee: Partial<Employee>): Promise<Employee | null> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'employees', id);
+      const collectionRef = this.getCollection('employees');
+      const docRef = doc(collectionRef as any, id);
       
       await updateDoc(docRef, updatedEmployee);
       console.log('Colaborador atualizado:', id);
@@ -537,8 +580,8 @@ class FirestoreService {
 
   async deleteEmployee(id: string): Promise<boolean> {
     try {
-      const userId = this.getCurrentUserId();
-      const docRef = doc(db, 'userData', userId, 'employees', id);
+      const collectionRef = this.getCollection('employees');
+      const docRef = doc(collectionRef as any, id);
       
       await deleteDoc(docRef);
       console.log('Colaborador excluído:', id);
@@ -564,7 +607,6 @@ class FirestoreService {
       const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
       const balance = totalRevenue - totalExpenses;
 
-      // Dados mensais para gráficos (últimos 6 meses)
       const monthlyData = this.generateMonthlyData(revenues, expenses);
 
       return {
@@ -589,7 +631,6 @@ class FirestoreService {
     const currentDate = new Date();
     const monthlyData = [];
 
-    // Gerar dados dos últimos 6 meses
     for (let i = 5; i >= 0; i--) {
       const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -652,8 +693,5 @@ class FirestoreService {
   }
 }
 
-// Instância singleton do serviço
 export const firestoreService = new FirestoreService();
-
-// Exportar também a classe
 export default FirestoreService;
