@@ -5,6 +5,7 @@ import * as yup from 'yup';
 import { Lawyer } from '../../types';
 import { ArrowLeftIcon, PlusIcon, XMarkIcon, PhotoIcon } from '@heroicons/react/24/outline';
 import { firestoreService } from '../../services/firestoreService';
+import { usePermissionCheck } from '../Common/withPermission';
 
 const schema = yup.object({
   fullName: yup.string().required('Nome completo é obrigatório'),
@@ -28,6 +29,10 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
   const [newSpecialty, setNewSpecialty] = useState('');
   const [photoPreview, setPhotoPreview] = useState<string>(lawyer?.photo || '');
   const [loading, setLoading] = useState(false);
+  
+  // NOVO: Permission checks
+  const { hasPermission } = usePermissionCheck();
+  const canEdit = hasPermission('equipe');
   
   const {
     register,
@@ -61,12 +66,16 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
   }, [lawyer, reset]);
 
   const onSubmit = async (data: Partial<Lawyer>) => {
+    if (!canEdit) {
+      alert('Você não possui permissão para salvar advogados.');
+      return;
+    }
+
     if (loading) return;
 
     try {
       setLoading(true);
 
-      // Validação básica dos campos obrigatórios
       if (!data.fullName?.trim() || !data.cpf?.trim() || !data.oab?.trim()) {
         alert('Por favor, preencha todos os campos obrigatórios.');
         return;
@@ -74,7 +83,7 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
 
       const lawyerData = {
         fullName: data.fullName.trim(),
-        cpf: data.cpf.replace(/\D/g, ''), // Remove formatação do CPF
+        cpf: data.cpf.replace(/\D/g, ''),
         oab: data.oab.trim(),
         commission: Number(data.commission) || 10,
         email: data.email?.trim() || '',
@@ -86,7 +95,6 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
       };
 
       if (lawyer?.id) {
-        // Atualizar advogado existente
         const updatedLawyer = await firestoreService.updateLawyer(lawyer.id, lawyerData);
         
         if (updatedLawyer) {
@@ -96,7 +104,6 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
           throw new Error('Erro ao atualizar advogado');
         }
       } else {
-        // Criar novo advogado
         const newLawyer = await firestoreService.saveLawyer(lawyerData);
         
         console.log('Novo advogado criado com sucesso');
@@ -112,6 +119,8 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
   };
 
   const addSpecialty = () => {
+    if (!canEdit) return;
+    
     const trimmedSpecialty = newSpecialty.trim();
     if (trimmedSpecialty && !specialties.includes(trimmedSpecialty)) {
       setSpecialties([...specialties, trimmedSpecialty]);
@@ -120,13 +129,15 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
   };
 
   const removeSpecialty = (index: number) => {
+    if (!canEdit) return;
     setSpecialties(specialties.filter((_, i) => i !== index));
   };
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
+    
     const file = e.target.files?.[0];
     if (file) {
-      // Verificar tamanho do arquivo (máximo 2MB para Base64)
       if (file.size > 2 * 1024 * 1024) {
         alert('Arquivo muito grande. Escolha uma imagem menor que 2MB.');
         return;
@@ -166,9 +177,31 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
     }
   };
 
+  // NOVO: Guard de permissão
+  if (!canEdit) {
+    return (
+      <div className="p-6">
+        <div className="max-w-md mx-auto text-center py-12">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <XMarkIcon className="w-8 h-8 text-red-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Sem Permissão</h2>
+          <p className="text-gray-600 mb-4">
+            Você não possui permissão para {lawyer ? 'editar' : 'criar'} advogados.
+          </p>
+          <button
+            onClick={onBack}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Voltar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
-      {/* Header */}
       <div className="flex items-center mb-6">
         <button
           onClick={onBack}
@@ -188,10 +221,8 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
         </div>
       </div>
 
-      {/* Form */}
       <form onSubmit={handleSubmit(onSubmit)} className="max-w-4xl">
         <div className="bg-white rounded-lg shadow p-6 space-y-6">
-          {/* Photo Section */}
           <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Foto do Advogado</h3>
             <div className="flex items-center space-x-6">
@@ -219,11 +250,11 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                   onChange={handlePhotoChange}
                   className="hidden"
                   id="photo-upload"
-                  disabled={loading}
+                  disabled={loading || !canEdit}
                 />
                 <label
                   htmlFor="photo-upload"
-                  className={`cursor-pointer inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`cursor-pointer inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors ${loading || !canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <PhotoIcon className="w-4 h-4 mr-2" />
                   Escolher Foto
@@ -231,7 +262,7 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                 <p className="text-xs text-gray-500 mt-1">
                   JPG, PNG ou GIF até 2MB
                 </p>
-                {photoPreview && (
+                {photoPreview && canEdit && (
                   <button
                     type="button"
                     onClick={() => setPhotoPreview('')}
@@ -245,7 +276,6 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
             </div>
           </div>
 
-          {/* Basic Information */}
           <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Informações Pessoais</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -256,8 +286,8 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                 <input
                   {...register('fullName')}
                   type="text"
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="Nome completo do advogado"
                 />
                 {errors.fullName && (
@@ -273,13 +303,13 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                   {...register('cpf')}
                   type="text"
                   maxLength={14}
-                  disabled={loading}
+                  disabled={loading || !canEdit}
                   onChange={(e) => {
                     const formatted = formatCpf(e.target.value);
                     e.target.value = formatted;
                     setValue('cpf', formatted);
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="000.000.000-00"
                 />
                 {errors.cpf && (
@@ -294,8 +324,8 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                 <input
                   {...register('oab')}
                   type="text"
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="123456/SP"
                 />
                 {errors.oab && (
@@ -319,8 +349,8 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                   min="0"
                   max="100"
                   step="0.1"
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="10.0"
                 />
                 {errors.commission && (
@@ -335,8 +365,8 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                 <input
                   {...register('email')}
                   type="email"
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="email@exemplo.com"
                 />
                 {errors.email && (
@@ -352,13 +382,13 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                   {...register('phone')}
                   type="text"
                   maxLength={15}
-                  disabled={loading}
+                  disabled={loading || !canEdit}
                   onChange={(e) => {
                     const formatted = formatPhone(e.target.value);
                     e.target.value = formatted;
                     setValue('phone', formatted);
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="(11) 99999-9999"
                 />
               </div>
@@ -370,8 +400,8 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                 <input
                   {...register('address')}
                   type="text"
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder="Endereço completo"
                 />
               </div>
@@ -382,8 +412,8 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                 </label>
                 <select
                   {...register('status')}
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                  disabled={loading || !canEdit}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 >
                   <option value="Ativo">Ativo</option>
                   <option value="Inativo">Inativo</option>
@@ -395,7 +425,6 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
             </div>
           </div>
 
-          {/* Specialties */}
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Especialidades</h3>
@@ -412,14 +441,14 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                     addSpecialty();
                   }
                 }}
-                disabled={loading}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                disabled={loading || !canEdit}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 placeholder="Ex: Direito Trabalhista"
               />
               <button
                 type="button"
                 onClick={addSpecialty}
-                disabled={loading || !newSpecialty.trim()}
+                disabled={loading || !canEdit || !newSpecialty.trim()}
                 className="flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <PlusIcon className="w-4 h-4 mr-2" />
@@ -432,14 +461,16 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
                 {specialties.map((specialty, index) => (
                   <div key={index} className="flex items-center px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
                     <span>{specialty}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeSpecialty(index)}
-                      disabled={loading}
-                      className="ml-2 text-blue-600 hover:text-blue-800 disabled:opacity-50"
-                    >
-                      <XMarkIcon className="w-4 h-4" />
-                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => removeSpecialty(index)}
+                        disabled={loading}
+                        className="ml-2 text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                      >
+                        <XMarkIcon className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -448,7 +479,6 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
             )}
           </div>
 
-          {/* Actions */}
           <div className="flex items-center justify-end space-x-4 pt-6 border-t">
             <button
               type="button"
@@ -460,8 +490,12 @@ export default function LawyerForm({ lawyer, onBack, onSave }: LawyerFormProps) 
             </button>
             <button
               type="submit"
-              disabled={loading}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center"
+              disabled={loading || !canEdit}
+              className={`px-6 py-2 rounded-lg transition-colors flex items-center ${
+                canEdit && !loading
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
             >
               {loading ? (
                 <>

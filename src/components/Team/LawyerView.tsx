@@ -4,6 +4,7 @@ import { ArrowLeftIcon, PencilIcon, UserIcon, EnvelopeIcon, PhoneIcon, MapPinIco
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { firestoreService } from '../../services/firestoreService';
+import { usePermissionCheck } from '../Common/withPermission';
 
 interface LawyerViewProps {
   lawyer: Lawyer;
@@ -13,6 +14,10 @@ interface LawyerViewProps {
 }
 
 export default function LawyerView({ lawyer, onBack, onEdit, onUpdate }: LawyerViewProps) {
+  // NOVO: Permission checks
+  const { hasPermission } = usePermissionCheck();
+  const canEdit = hasPermission('equipe');
+
   const formatDate = (dateString: string) => {
     return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
   };
@@ -22,6 +27,11 @@ export default function LawyerView({ lawyer, onBack, onEdit, onUpdate }: LawyerV
   };
 
   const handleToggleStatus = async () => {
+    if (!canEdit) {
+      alert('Você não possui permissão para alterar o status do advogado.');
+      return;
+    }
+
     const newStatus = lawyer.status === 'Ativo' ? 'Inativo' : 'Ativo';
     const action = newStatus === 'Ativo' ? 'ativar' : 'inativar';
     
@@ -41,9 +51,16 @@ export default function LawyerView({ lawyer, onBack, onEdit, onUpdate }: LawyerV
     }
   };
 
+  const handleEditClick = () => {
+    if (!canEdit) {
+      alert('Você não possui permissão para editar advogados.');
+      return;
+    }
+    onEdit();
+  };
+
   return (
     <div className="p-6">
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center">
           <button
@@ -61,17 +78,27 @@ export default function LawyerView({ lawyer, onBack, onEdit, onUpdate }: LawyerV
         <div className="flex items-center space-x-3">
           <button
             onClick={handleToggleStatus}
+            disabled={!canEdit}
             className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
-              lawyer.status === 'Ativo'
-                ? 'bg-red-600 text-white hover:bg-red-700'
-                : 'bg-green-600 text-white hover:bg-green-700'
+              canEdit
+                ? lawyer.status === 'Ativo'
+                  ? 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-green-600 text-white hover:bg-green-700'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
             }`}
+            title={!canEdit ? 'Sem permissão para alterar status' : undefined}
           >
             {lawyer.status === 'Ativo' ? 'Inativar' : 'Ativar'}
           </button>
           <button
-            onClick={onEdit}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            onClick={handleEditClick}
+            disabled={!canEdit}
+            className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+              canEdit
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+            title={!canEdit ? 'Sem permissão para editar' : 'Editar advogado'}
           >
             <PencilIcon className="w-5 h-5 mr-2" />
             Editar
@@ -80,7 +107,6 @@ export default function LawyerView({ lawyer, onBack, onEdit, onUpdate }: LawyerV
       </div>
 
       <div className="max-w-4xl space-y-6">
-        {/* Profile Section */}
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex items-center space-x-6 mb-6">
             {lawyer.photo ? (
@@ -110,7 +136,6 @@ export default function LawyerView({ lawyer, onBack, onEdit, onUpdate }: LawyerV
           </div>
         </div>
 
-        {/* Personal Information */}
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Informações Pessoais</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -173,7 +198,6 @@ export default function LawyerView({ lawyer, onBack, onEdit, onUpdate }: LawyerV
           </div>
         </div>
 
-        {/* Specialties */}
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Especialidades</h3>
           {lawyer.specialties && lawyer.specialties.length > 0 ? (
@@ -192,7 +216,6 @@ export default function LawyerView({ lawyer, onBack, onEdit, onUpdate }: LawyerV
           )}
         </div>
 
-        {/* Statistics */}
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Estatísticas</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

@@ -16,6 +16,7 @@ import {
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { firestoreService } from '../../services/firestoreService';
+import { usePermissionCheck } from '../Common/withPermission';
 
 interface EventViewProps {
   event: CalendarEvent;
@@ -25,7 +26,6 @@ interface EventViewProps {
   onUpdate?: (event: CalendarEvent) => void;
 }
 
-// Configuração de tipos de evento com cores e ícones
 const EVENT_TYPES = {
   'Audiência': {
     color: 'bg-red-100 text-red-800',
@@ -67,6 +67,11 @@ const PRIORITY_COLORS = {
 };
 
 export default function EventView({ event, onBack, onEdit, onDelete, onUpdate }: EventViewProps) {
+  // NOVO: Permission checks
+  const { hasPermission } = usePermissionCheck();
+  const canEdit = hasPermission('agenda');
+  const canDelete = hasPermission('agenda');
+
   const formatDate = (dateString: string) => {
     return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
   };
@@ -76,6 +81,11 @@ export default function EventView({ event, onBack, onEdit, onDelete, onUpdate }:
   };
 
   const handleMarkAsCompleted = async () => {
+    if (!canEdit) {
+      alert('Você não possui permissão para alterar o status do evento.');
+      return;
+    }
+
     if (confirm('Tem certeza que deseja marcar este evento como concluído?')) {
       try {
         const updatedEvent = await firestoreService.updateEvent(event.id, {
@@ -93,6 +103,11 @@ export default function EventView({ event, onBack, onEdit, onDelete, onUpdate }:
   };
 
   const handleMarkAsPending = async () => {
+    if (!canEdit) {
+      alert('Você não possui permissão para alterar o status do evento.');
+      return;
+    }
+
     if (confirm('Tem certeza que deseja marcar este evento como pendente?')) {
       try {
         const updatedEvent = await firestoreService.updateEvent(event.id, {
@@ -109,12 +124,27 @@ export default function EventView({ event, onBack, onEdit, onDelete, onUpdate }:
     }
   };
 
+  const handleEditClick = () => {
+    if (!canEdit) {
+      alert('Você não possui permissão para editar eventos.');
+      return;
+    }
+    onEdit();
+  };
+
+  const handleDeleteClick = () => {
+    if (!canDelete) {
+      alert('Você não possui permissão para excluir eventos.');
+      return;
+    }
+    onDelete();
+  };
+
   const eventConfig = EVENT_TYPES[event.type] || EVENT_TYPES['Outro'];
   const IconComponent = eventConfig.icon;
 
   return (
     <div className="p-6">
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center">
           <button
@@ -136,7 +166,13 @@ export default function EventView({ event, onBack, onEdit, onDelete, onUpdate }:
           {event.status === 'Pendente' ? (
             <button
               onClick={handleMarkAsCompleted}
-              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              disabled={!canEdit}
+              className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+                canEdit
+                  ? 'bg-green-600 text-white hover:bg-green-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+              title={!canEdit ? 'Sem permissão para alterar status' : 'Marcar como concluído'}
             >
               <CheckCircleIcon className="w-5 h-5 mr-2" />
               Marcar como Concluído
@@ -144,22 +180,40 @@ export default function EventView({ event, onBack, onEdit, onDelete, onUpdate }:
           ) : (
             <button
               onClick={handleMarkAsPending}
-              className="flex items-center px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+              disabled={!canEdit}
+              className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+                canEdit
+                  ? 'bg-amber-600 text-white hover:bg-amber-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+              title={!canEdit ? 'Sem permissão para alterar status' : 'Marcar como pendente'}
             >
               <ClockIcon className="w-5 h-5 mr-2" />
               Marcar como Pendente
             </button>
           )}
           <button
-            onClick={onEdit}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            onClick={handleEditClick}
+            disabled={!canEdit}
+            className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+              canEdit
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+            title={!canEdit ? 'Sem permissão para editar' : 'Editar evento'}
           >
             <PencilIcon className="w-5 h-5 mr-2" />
             Remarcar
           </button>
           <button
-            onClick={onDelete}
-            className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+           onClick={handleDeleteClick}
+            disabled={!canDelete}
+            className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+              canDelete
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+            title={!canDelete ? 'Sem permissão para excluir' : 'Excluir evento'}
           >
             <TrashIcon className="w-5 h-5 mr-2" />
             Excluir
@@ -168,7 +222,6 @@ export default function EventView({ event, onBack, onEdit, onDelete, onUpdate }:
       </div>
 
       <div className="max-w-4xl space-y-6">
-        {/* Event Information */}
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Informações do Evento</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -276,7 +329,6 @@ export default function EventView({ event, onBack, onEdit, onDelete, onUpdate }:
           </div>
         </div>
 
-        {/* Notes */}
         {event.notes && (
           <div className="bg-white rounded-lg shadow p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Observações</h3>
@@ -286,14 +338,18 @@ export default function EventView({ event, onBack, onEdit, onDelete, onUpdate }:
           </div>
         )}
 
-        {/* Quick Actions */}
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Ações Rápidas</h3>
           <div className="flex flex-wrap gap-3">
             {event.status === 'Pendente' ? (
               <button
                 onClick={handleMarkAsCompleted}
-                className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                disabled={!canEdit}
+                className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+                  canEdit
+                    ? 'bg-green-600 text-white hover:bg-green-700'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
               >
                 <CheckCircleIcon className="w-4 h-4 mr-2" />
                 Marcar como Concluído
@@ -301,7 +357,12 @@ export default function EventView({ event, onBack, onEdit, onDelete, onUpdate }:
             ) : (
               <button
                 onClick={handleMarkAsPending}
-                className="flex items-center px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+                disabled={!canEdit}
+                className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+                  canEdit
+                    ? 'bg-amber-600 text-white hover:bg-amber-700'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
               >
                 <ClockIcon className="w-4 h-4 mr-2" />
                 Marcar como Pendente
@@ -309,16 +370,26 @@ export default function EventView({ event, onBack, onEdit, onDelete, onUpdate }:
             )}
             
             <button
-              onClick={onEdit}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              onClick={handleEditClick}
+              disabled={!canEdit}
+              className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+                canEdit
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
             >
               <PencilIcon className="w-4 h-4 mr-2" />
               Remarcar Evento
             </button>
             
             <button
-              onClick={onDelete}
-              className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              onClick={handleDeleteClick}
+              disabled={!canDelete}
+              className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+                canDelete
+                  ? 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
             >
               <TrashIcon className="w-4 h-4 mr-2" />
               Excluir Evento
