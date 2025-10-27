@@ -6,6 +6,7 @@ import { CalendarEvent, Lawyer } from '../../types';
 import { ArrowLeftIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { firestoreService } from '../../services/firestoreService';
 import { format } from 'date-fns';
+import { usePermissionCheck } from '../Common/withPermission';
 
 const schema = yup.object({
   title: yup.string().required('Título é obrigatório'),
@@ -32,6 +33,10 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
   const [selectedLawyers, setSelectedLawyers] = React.useState<string[]>(event?.lawyers || []);
   const [processes, setProcesses] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(true);
+  
+  // NOVO: Permission checks
+  const { hasPermission } = usePermissionCheck();
+  const canEdit = hasPermission('agenda');
   
   const {
     register,
@@ -69,19 +74,16 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
     try {
       setLoading(true);
       
-      // Carregar advogados ativos e processos em paralelo
       const [loadedLawyers, loadedProcesses] = await Promise.all([
         firestoreService.getLawyers(),
         firestoreService.getProcesses()
       ]);
       
-      // Filtrar apenas advogados ativos
       const activeLawyers = loadedLawyers.filter(l => l.status === 'Ativo');
       setLawyers(activeLawyers);
       setProcesses(loadedProcesses);
       
-      console.log(`${activeLawyers.length} advogados ativos carregados do Firestore`);
-      console.log(`${loadedProcesses.length} processos carregados do Firestore`);
+      console.log(`${activeLawyers.length} advogados ativos carregados`);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
     } finally {
@@ -89,13 +91,11 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
     }
   };
 
-  // Auto-preencher cliente baseado no processo selecionado
   useEffect(() => {
     if (watchedProcessNumber) {
       const selectedProcess = processes.find(p => p.processNumber === watchedProcessNumber);
       if (selectedProcess) {
         setValue('client', selectedProcess.client);
-        // Auto-selecionar advogados responsáveis do processo
         if (selectedProcess.responsibleLawyers) {
           setSelectedLawyers(selectedProcess.responsibleLawyers);
         }
@@ -104,6 +104,8 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
   }, [watchedProcessNumber, processes, setValue]);
 
   const handleLawyerToggle = (lawyerName: string) => {
+    if (!canEdit) return;
+    
     setSelectedLawyers(prev => {
       if (prev.includes(lawyerName)) {
         return prev.filter(name => name !== lawyerName);
@@ -114,6 +116,11 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
   };
 
   const onSubmit = (data: Partial<CalendarEvent>) => {
+    if (!canEdit) {
+      alert('Você não possui permissão para salvar eventos.');
+      return;
+    }
+    
     const eventData: CalendarEvent = {
       id: event?.id || Date.now().toString(),
       status: 'Pendente',
@@ -137,9 +144,31 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
     );
   }
 
+  // NOVO: Guard de permissão
+  if (!canEdit) {
+    return (
+      <div className="p-6">
+        <div className="max-w-md mx-auto text-center py-12">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <XMarkIcon className="w-8 h-8 text-red-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Sem Permissão</h2>
+          <p className="text-gray-600 mb-4">
+            Você não possui permissão para {event ? 'editar' : 'criar'} eventos.
+          </p>
+          <button
+            onClick={onBack}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Voltar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
-      {/* Header */}
       <div className="flex items-center mb-6">
         <button
           onClick={onBack}
@@ -158,7 +187,6 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
         </div>
       </div>
 
-      {/* Form */}
       <form onSubmit={handleSubmit(onSubmit)} className="max-w-2xl">
         <div className="bg-white rounded-lg shadow p-6 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -169,7 +197,8 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
               <input
                 {...register('title')}
                 type="text"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 placeholder="Ex: Audiência - João Silva"
               />
               {errors.title && (
@@ -184,7 +213,8 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
               <input
                 {...register('date')}
                 type="date"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               />
               {errors.date && (
                 <p className="text-red-500 text-sm mt-1">{errors.date.message}</p>
@@ -198,7 +228,8 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
               <input
                 {...register('time')}
                 type="time"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               />
               {errors.time && (
                 <p className="text-red-500 text-sm mt-1">{errors.time.message}</p>
@@ -211,7 +242,8 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
               </label>
               <select
                 {...register('processNumber')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               >
                 <option value="">Selecione um processo (opcional)</option>
                 {processes.map((process) => (
@@ -229,7 +261,8 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
               <input
                 {...register('client')}
                 type="text"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 placeholder="Nome do cliente (opcional)"
               />
             </div>
@@ -240,7 +273,8 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
               </label>
               <select
                 {...register('type')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               >
                 <option value="Audiência">Audiência</option>
                 <option value="Reunião com Cliente">Reunião com Cliente</option>
@@ -260,7 +294,8 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
               </label>
               <select
                 {...register('priority')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               >
                 <option value="Baixa">Baixa</option>
                 <option value="Média">Média</option>
@@ -276,7 +311,8 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
               <input
                 {...register('location')}
                 type="text"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 placeholder="Ex: Fórum Central - Sala 205"
               />
             </div>
@@ -294,7 +330,8 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
                           type="checkbox"
                           checked={selectedLawyers.includes(lawyer.fullName)}
                           onChange={() => handleLawyerToggle(lawyer.fullName)}
-                          className="mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          disabled={!canEdit}
+                          className="mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded disabled:opacity-50"
                         />
                         <span className="text-sm text-gray-700">
                           {lawyer.fullName} - OAB: {lawyer.oab}
@@ -316,13 +353,15 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
                         className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
                       >
                         {lawyer}
-                        <button
-                          type="button"
-                          onClick={() => handleLawyerToggle(lawyer)}
-                          className="ml-1 text-blue-600 hover:text-blue-800"
-                        >
-                          <XMarkIcon className="w-3 h-3" />
-                        </button>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => handleLawyerToggle(lawyer)}
+                            className="ml-1 text-blue-600 hover:text-blue-800"
+                          >
+                            <XMarkIcon className="w-3 h-3" />
+                          </button>
+                        )}
                       </span>
                     ))}
                   </div>
@@ -330,11 +369,6 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
               )}
               {selectedLawyers.length === 0 && (
                 <p className="text-red-500 text-sm mt-1">Pelo menos um advogado é obrigatório</p>
-              )}
-              {lawyers.length === 0 && (
-                <p className="text-amber-600 text-sm mt-1">
-                  Nenhum advogado ativo encontrado. Cadastre advogados na aba "Advogados".
-                </p>
               )}
             </div>
 
@@ -345,13 +379,13 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
               <textarea
                 {...register('notes')}
                 rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 placeholder="Observações adicionais sobre o evento..."
               />
             </div>
           </div>
 
-          {/* Actions */}
           <div className="flex items-center justify-end space-x-4 pt-6 border-t">
             <button
               type="button"
@@ -362,7 +396,12 @@ export default function CalendarForm({ event, selectedDate, onBack, onSave }: Ca
             </button>
             <button
               type="submit"
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              disabled={!canEdit}
+              className={`px-6 py-2 rounded-lg transition-colors ${
+                canEdit
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
             >
               {event ? 'Atualizar' : 'Salvar'} Evento
             </button>

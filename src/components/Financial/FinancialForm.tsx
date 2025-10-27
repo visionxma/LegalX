@@ -5,6 +5,7 @@ import * as yup from 'yup';
 import { Revenue, Expense, Lawyer, Employee } from '../../types';
 import { ArrowLeftIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { firestoreService } from '../../services/firestoreService';
+import { usePermissionCheck } from '../Common/withPermission';
 
 const revenueSchema = yup.object({
   date: yup.string().required('Data é obrigatória'),
@@ -40,6 +41,11 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
     (item as any)?.responsibleLawyers || (item as any)?.responsibleMembers || []
   );
   const [loading, setLoading] = React.useState(true);
+  
+  // NOVO: Permission checks
+  const { hasPermission } = usePermissionCheck();
+  const canEdit = hasPermission('financas');
+  
   const schema = type === 'revenue' ? revenueSchema : expenseSchema;
   
   const {
@@ -61,7 +67,6 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
       Object.keys(item).forEach((key) => {
         setValue(key as any, (item as any)[key]);
       });
-      // Manter compatibilidade com dados antigos
       const responsibleMembers = (item as any)?.responsibleMembers || (item as any)?.responsibleLawyers || [];
       setSelectedMembers(responsibleMembers);
     }
@@ -70,7 +75,6 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
   const loadTeamMembers = async () => {
     try {
       setLoading(true);
-      // Carregar advogados e colaboradores ativos em paralelo
       const [loadedLawyers, loadedEmployees] = await Promise.all([
         firestoreService.getLawyers(),
         firestoreService.getEmployees()
@@ -88,6 +92,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
   };
 
   const handleMemberToggle = (memberName: string) => {
+    if (!canEdit) return;
+    
     setSelectedMembers(prev => {
       if (prev.includes(memberName)) {
         return prev.filter(name => name !== memberName);
@@ -98,10 +104,14 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
   };
 
   const onSubmit = (data: any) => {
+    if (!canEdit) {
+      alert('Você não possui permissão para salvar registros financeiros.');
+      return;
+    }
+    
     const itemData = {
       id: item?.id || Date.now().toString(),
       responsibleMembers: selectedMembers,
-      // Manter compatibilidade com dados antigos para receitas
       ...(type === 'revenue' && { responsibleLawyers: selectedMembers }),
       ...data
     };
@@ -120,9 +130,31 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
     );
   }
 
+  // NOVO: Guard de permissão
+  if (!canEdit) {
+    return (
+      <div className="p-6">
+        <div className="max-w-md mx-auto text-center py-12">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <XMarkIcon className="w-8 h-8 text-red-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Sem Permissão</h2>
+          <p className="text-gray-600 mb-4">
+            Você não possui permissão para {item ? 'editar' : 'criar'} {type === 'revenue' ? 'receitas' : 'despesas'}.
+          </p>
+          <button
+            onClick={onBack}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Voltar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
-      {/* Header */}
       <div className="flex items-center mb-6">
         <button
           onClick={onBack}
@@ -142,7 +174,6 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
         </div>
       </div>
 
-      {/* Form */}
       <form onSubmit={handleSubmit(onSubmit)} className="max-w-2xl">
         <div className="bg-white rounded-lg shadow p-6 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -153,7 +184,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
               <input
                 {...register('date')}
                 type="date"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               />
               {errors.date && (
                 <p className="text-red-500 text-sm mt-1">{errors.date.message}</p>
@@ -169,7 +201,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                 type="number"
                 step="0.01"
                 min="0"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 placeholder="0.00"
               />
               {errors.amount && (
@@ -186,7 +219,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                   <input
                     {...register('source')}
                     type="text"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!canEdit}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                     placeholder="Ex: João Silva"
                   />
                   {errors.source && (
@@ -200,7 +234,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                   </label>
                   <select
                     {...register('category')}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!canEdit}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   >
                     <option value="Honorário">Honorário</option>
                     <option value="Consultoria">Consultoria</option>
@@ -218,7 +253,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                   <input
                     {...register('client')}
                     type="text"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!canEdit}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                     placeholder="Nome do cliente (opcional)"
                   />
                 </div>
@@ -230,7 +266,6 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                   <div className="border border-gray-300 rounded-lg p-3 max-h-32 overflow-y-auto">
                     {(lawyers.length > 0 || employees.length > 0) ? (
                       <div className="space-y-2">
-                        {/* Advogados */}
                         {lawyers.length > 0 && (
                           <>
                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Advogados</p>
@@ -240,7 +275,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                                   type="checkbox"
                                   checked={selectedMembers.includes(lawyer.fullName)}
                                   onChange={() => handleMemberToggle(lawyer.fullName)}
-                                  className="mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                  disabled={!canEdit}
+                                  className="mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded disabled:opacity-50"
                                 />
                                 <span className="text-sm text-gray-700">
                                   {lawyer.fullName} - OAB: {lawyer.oab}
@@ -250,7 +286,6 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                           </>
                         )}
                         
-                        {/* Colaboradores */}
                         {employees.length > 0 && (
                           <>
                             {lawyers.length > 0 && <div className="border-t border-gray-200 my-2"></div>}
@@ -261,7 +296,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                                   type="checkbox"
                                   checked={selectedMembers.includes(employee.fullName)}
                                   onChange={() => handleMemberToggle(employee.fullName)}
-                                  className="mr-3 h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                                  disabled={!canEdit}
+                                  className="mr-3 h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded disabled:opacity-50"
                                 />
                                 <span className="text-sm text-gray-700">
                                   {employee.fullName} - {employee.position}
@@ -290,23 +326,20 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                               }`}
                             >
                               {member}
-                              <button
-                                type="button"
-                                onClick={() => handleMemberToggle(member)}
-                                className={`ml-1 hover:${isLawyer ? 'text-blue-800' : 'text-green-800'}`}
-                              >
-                                <XMarkIcon className="w-3 h-3" />
-                              </button>
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMemberToggle(member)}
+                                  className={`ml-1 hover:${isLawyer ? 'text-blue-800' : 'text-green-800'}`}
+                                >
+                                  <XMarkIcon className="w-3 h-3" />
+                                </button>
+                              )}
                             </span>
                           );
                         })}
                       </div>
                     </div>
-                  )}
-                  {(lawyers.length === 0 && employees.length === 0) && (
-                    <p className="text-amber-600 text-sm mt-1">
-                      Nenhum responsável ativo encontrado. Cadastre advogados ou colaboradores.
-                    </p>
                   )}
                 </div>
               </>
@@ -319,7 +352,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                   <input
                     {...register('type')}
                     type="text"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!canEdit}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                     placeholder="Ex: Aluguel do escritório"
                   />
                   {errors.type && (
@@ -333,7 +367,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                   </label>
                   <select
                     {...register('category')}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!canEdit}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   >
                     <option value="Aluguel">Aluguel</option>
                     <option value="Internet">Internet</option>
@@ -356,7 +391,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                   <input
                     {...register('receipt')}
                     type="text"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!canEdit}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                     placeholder="Nome do arquivo ou referência"
                   />
                 </div>
@@ -368,7 +404,6 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                   <div className="border border-gray-300 rounded-lg p-3 max-h-32 overflow-y-auto">
                     {(lawyers.length > 0 || employees.length > 0) ? (
                       <div className="space-y-2">
-                        {/* Advogados */}
                         {lawyers.length > 0 && (
                           <>
                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Advogados</p>
@@ -378,7 +413,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                                   type="checkbox"
                                   checked={selectedMembers.includes(lawyer.fullName)}
                                   onChange={() => handleMemberToggle(lawyer.fullName)}
-                                  className="mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                  disabled={!canEdit}
+                                  className="mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded disabled:opacity-50"
                                 />
                                 <span className="text-sm text-gray-700">
                                   {lawyer.fullName} - OAB: {lawyer.oab}
@@ -388,7 +424,6 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                           </>
                         )}
                         
-                        {/* Colaboradores */}
                         {employees.length > 0 && (
                           <>
                             {lawyers.length > 0 && <div className="border-t border-gray-200 my-2"></div>}
@@ -399,7 +434,8 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                                   type="checkbox"
                                   checked={selectedMembers.includes(employee.fullName)}
                                   onChange={() => handleMemberToggle(employee.fullName)}
-                                  className="mr-3 h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                                  disabled={!canEdit}
+                                  className="mr-3 h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded disabled:opacity-50"
                                 />
                                 <span className="text-sm text-gray-700">
                                   {employee.fullName} - {employee.position}
@@ -428,23 +464,20 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
                               }`}
                             >
                               {member}
-                              <button
-                                type="button"
-                                onClick={() => handleMemberToggle(member)}
-                                className={`ml-1 hover:${isLawyer ? 'text-blue-800' : 'text-green-800'}`}
-                              >
-                                <XMarkIcon className="w-3 h-3" />
-                              </button>
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMemberToggle(member)}
+                                  className={`ml-1 hover:${isLawyer ? 'text-blue-800' : 'text-green-800'}`}
+                                >
+                                  <XMarkIcon className="w-3 h-3" />
+                                </button>
+                              )}
                             </span>
                           );
                         })}
                       </div>
                     </div>
-                  )}
-                  {(lawyers.length === 0 && employees.length === 0) && (
-                    <p className="text-amber-600 text-sm mt-1">
-                      Nenhum responsável ativo encontrado. Cadastre advogados ou colaboradores.
-                    </p>
                   )}
                 </div>
               </>
@@ -457,13 +490,13 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
               <textarea
                 {...register('description')}
                 rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 placeholder="Descrição adicional (opcional)"
               />
             </div>
           </div>
 
-          {/* Actions */}
           <div className="flex items-center justify-end space-x-4 pt-6 border-t">
             <button
               type="button"
@@ -474,10 +507,13 @@ export default function FinancialForm({ type, item, onBack, onSave }: FinancialF
             </button>
             <button
               type="submit"
-              className={`px-6 py-2 text-white rounded-lg transition-colors ${
-                type === 'revenue'
-                  ? 'bg-green-600 hover:bg-green-700'
-                  : 'bg-red-600 hover:bg-red-700'
+              disabled={!canEdit}
+              className={`px-6 py-2 rounded-lg transition-colors ${
+                canEdit
+                  ? type === 'revenue'
+                    ? 'bg-green-600 text-white hover:bg-green-700'
+                    : 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
               }`}
             >
               {item ? 'Atualizar' : 'Salvar'} {type === 'revenue' ? 'Receita' : 'Despesa'}
